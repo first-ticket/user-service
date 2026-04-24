@@ -1,44 +1,41 @@
 server:
-  port: 8081
+  port: 8081  # user-service 고정 포트
 
 spring:
   application:
-    name: user-service
+    name: user-service  # Eureka 등록명 / Config Server 설정 경로명으로 사용
+
+  profiles:
+    active: local  # 기본 프로파일 (IDE에서 별도 지정 없을 때 로컬로 실행)
+
   config:
-    import: "optional:configserver:${CONFIG_SERVER_URI:http://localhost:8888}"
+    import: "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"  # Config Server 주소
+
   cloud:
     config:
-      username: ${CONFIG_SERVER_USERNAME:admin}
+      username: ${CONFIG_SERVER_USERNAME:admin}  # Config Server Basic Auth
       password: ${CONFIG_SERVER_PASSWORD:admin}
-  datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:user_service}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
-    driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
-      ddl-auto: validate
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+      ddl-auto: validate  # Flyway가 스키마 관리하므로 validate 고정
+    open-in-view: false # Open Session In View 패턴 비활성화 - DB 커넥션 점유 이슈 있음
+
+
   flyway:
-    enabled: true
+    enabled: true # Flyway 마이그레이션 활성화
     locations: classpath:db/migration
-    baseline-on-migrate: true
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+    baseline-on-migrate: true # 기존 DB에 Flyway 첫 적용 시 기준선 자동 생성
+
   jackson:
     time-zone: Asia/Seoul
     serialization:
-      write-dates-as-timestamps: false
+      write-dates-as-timestamps: false  # ISO-8601 문자열로 직렬화
 
-# ↓ spring: 블록 밖 — 루트 레벨
 eureka:
   client:
-    service-url:
-      defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
     tls:
       enabled: false
   instance:
@@ -51,9 +48,5 @@ management:
         include: health, info
 
 keycloak:
-  server-url: ${KEYCLOAK_URL:http://localhost:8180}
-  realm: first-ticket
-  client-id: ${KEYCLOAK_CLIENT_ID:user-service}
-  client-secret: ${KEYCLOAK_CLIENT_SECRET:}
-  admin-username: ${KEYCLOAK_ADMIN_USERNAME:admin}
-  admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}
+  realm: first-ticket # Keycloak Realm
+  client-id: ${KEYCLOAK_CLIENT_ID:user-service} # 클라이언트 ID

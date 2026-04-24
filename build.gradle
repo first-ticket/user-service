@@ -81,7 +81,7 @@ dependencies {
 	implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client' // Eureka 등록
 	implementation 'org.springframework.cloud:spring-cloud-starter-config' //Config Server 연동
 
-	// ===== Datebase =====
+	// ===== Database =====
 	runtimeOnly 'org.postgresql:postgresql' // PostgreSQL JDBC 드라이버
 	implementation 'org.flywaydb:flyway-core' // Flyway DB Migration
 	implementation 'org.flywaydb:flyway-database-postgresql' // PostgreSQL 전용 드라이버 (Flyway 10.x 버전에서 분리됨)
@@ -112,6 +112,7 @@ dependencies {
 	testCompileOnly         'org.projectlombok:lombok'
 	testAnnotationProcessor 'org.projectlombok:lombok'
 	testRuntimeOnly         'org.junit.platform:junit-platform-launcher'
+	testImplementation 'com.h2database:h2' // 테스트 전용 인메모리 DB
 }
 
 // QueryDSL Q클래스 생성 경로를 컴파일 소스에 포함

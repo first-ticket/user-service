@@ -1,3 +1,71 @@
+server:
+  port: 8081
+
 spring:
   application:
     name: user-service
+
+  # Config Server 연동
+  config:
+    import: "optional:configserver:${CONFIG_SERVER_URI:http://localhost:8888}"
+  cloud:
+    config:
+      username: ${CONFIG_SERVER_USERNAME:admin}
+      password: ${CONFIG_SERVER_PASSWORD:admin}
+
+  # 로컬 개발용 DB 설정 (Config Server 미연결시 fallback)
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:user_service}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+    jpa:
+      hibernate:
+        ddl-auto: validate  # Flyway가 스키마 관리 → JPA는 검증만 수행
+      properties:
+        hibernate:
+          dialect: org.hibernate.dialect.PostgreSQLDialect
+
+    flyway:
+      enabled: true
+      locations: classpath:db/migration  # V1__, V2__ 파일 위치
+      baseline-on-migrate: true          # 기존 DB가 있을 때 기준점 설정
+
+
+    data:
+      redis:
+        host: ${REDIS_HOST:localhost}
+        port: ${REDIS_PORT:6379}
+
+    jackson:
+      time-zone: Asia/Seoul
+      serialization:
+        write-dates-as-timestamps: false  # LocalDateTime → ISO-8601 문자열 직렬화
+
+    eureka:
+      client:
+        service-url:
+          defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
+        tls:
+          enabled: false  # Spring Cloud 2025.0.x TlsProperties 바인딩 버그 workaround
+      instance:
+        prefer-ip-address: true  # ECS Fargate - hostname 대신 컨테이너 IP 등록
+
+    management:
+      endpoints:
+        web:
+          exposure:
+            # 운영 환경: ECS Task 환경변수로 prometheus 추가
+            # MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info,prometheus
+            include: health, info
+
+    # Keycloak Admin Client 설정
+    # 실제 연동 코드에서 @ConfigurationProperties("keycloak")으로 바인딩 예정
+    keycloak:
+      server-url: ${KEYCLOAK_URL:http://localhost:8180}
+      realm: first-ticket
+      client-id: ${KEYCLOAK_CLIENT_ID:user-service}
+      client-secret: ${KEYCLOAK_CLIENT_SECRET:}
+      admin-username: ${KEYCLOAK_ADMIN_USERNAME:admin}
+      admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}

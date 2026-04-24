@@ -1,0 +1,19 @@
+# EditorConfig: IDE와 에디터에 코드 스타일을 강제 적용하는 설정 파일
+# 팀 전체 동일한 포맷팅 보장 (IntelliJ, VSCode, vim 등 지원)
+root = true
+
+# 전체 파일 공통 설정
+[*]
+charset = utf-8                # UTF-8 인코딩 통일
+end_of_line = lf               # 줄 끝 LF 통일 (Windows CRLF 방지)
+insert_final_newline = true    # 파일 끝 개행 필수 (Git diff 노이즈 방지)
+indent_style = space           # 들여쓰기 스페이스 사용
+indent_size = 4                # 기본 들여쓰기 4칸
+
+# Java 파일: 구글/IntelliJ 표준 최대 라인 길이 120
+[*.java]
+max_line_length = 120
+
+# YAML 파일: Spring 설정 컨벤션에 맞게 2칸 들여쓰기
+[*.{yml,yaml}]
+indent_size = 2

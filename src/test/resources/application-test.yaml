@@ -1,0 +1,32 @@
+spring:
+  config:
+    import: ""  # Config Server 연결 비활성화
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false  # 테스트 시 마이그레이션 비활성화
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+eureka:
+  client:
+    enabled: false  # 테스트 시 Eureka 등록 비활성화
+
+keycloak:
+  server-url: http://localhost:8180
+  realm: first-ticket
+  client-id: user-service
+  client-secret: ""
+  admin-username: admin
+  admin-password: admin

@@ -1,0 +1,51 @@
+services:
+
+  # PostgreSQL
+  # user-service 전용 DB. 스키마는 Flyway 마이그레이션으로 자동 생성됨
+  postgres:
+    image: postgres:16
+    container_name: user-postgres
+    environment:
+      POSTGRES_DB: user_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - user_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  # Refresh Token 저장 / Blacklist / Token Rotation 용도
+  redis:
+    image: redis:7
+    container_name: user-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Keycloak
+  # start-dev: 개발 모드 (TLS 없음, 내장 H2 DB 사용)
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: user-keycloak
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8180:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  user_postgres_data:

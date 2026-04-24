@@ -1,0 +1,17 @@
+# 모든 텍스트 파일의 줄 끝을 LF로 통일
+# Git checkout 시 OS와 무관하게 LF로 정규화
+* text=auto eol=lf
+
+# 실행 스크립트: LF 유지 (Linux/macOS 환경에서 실행되므로 CRLF 금지)
+gradlew text eol=lf
+
+# Windows 전용 스크립트: CRLF 유지 (CMD 실행 요건)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 바이너리 파일: 줄 끝 변환 금지 (변환 시 파일 손상 위험)
+*.jar binary
+*.class binary
+*.png binary
+*.jpg binary
+*.gif binary

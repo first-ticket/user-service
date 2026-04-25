@@ -9,7 +9,7 @@ CREATE TABLE users
     id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
 
     -- Keycloak 에서 발급된 사용자 sub(subject) UUID 문자열
-    -- 로그인 토큰 검증 후 사용자 조회 시 사용, 중복 방지를 위해 UNIQUE 제약조건
+    -- 로그인 토큰 검증 후 사용자 조회 시 사용
     keycloak_id VARCHAR(255) NOT NULL UNIQUE,
 
     -- 이메일 주소, Email VO 로 형식 검증 후 저장, 중복 가입 방지 UNIQUE 제약조건
@@ -35,3 +35,7 @@ CREATE TABLE users
     updated_by UUID,
     deleted_by UUID -- soft delete 주체
 );
+
+-- LOWER(email) 기준 unique index → 대소문자 무관 중복 방지
+-- ex) test@email.com / Test@email.com는 동일한 이메일로 간주 및 처리
+CREATE UNIQUE INDEX uq_users_email_lower ON users (LOWER(email));

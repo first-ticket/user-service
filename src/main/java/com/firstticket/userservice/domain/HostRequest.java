@@ -13,6 +13,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -58,6 +59,7 @@ public class HostRequest extends BaseUserEntity {
      * status 는 항상 PENDING 으로 초기화됩니다.
      */
     public static HostRequest create(UUID userId) {
+        Objects.requireNonNull(userId, "userId UUID값은 null일 수 없습니다."); // null 조기 차단
         HostRequest request = new HostRequest();
         request.userId = userId;
         request.status = HostRequestStatus.PENDING; // 초기 상태는 PENDING으로 고정

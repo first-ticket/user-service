@@ -19,12 +19,14 @@ public record Password(String value) {
     private static final int MIN_LENGTH = 8;
     private static final int MAX_LENGTH = 100;
 
+    public Password {
+        validate(value);
+    }
+
     /**
      * Password VO 의 유일한 생성 진입점
-     * 형식 위반 시 BusinessException(INVALID_PASSWORD_FORMAT)
      */
     public static Password of(String value) {
-        validate(value);
         return new Password(value);
     }
 

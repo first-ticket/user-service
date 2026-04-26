@@ -31,7 +31,7 @@ import java.util.UUID;
 @Table(name = "host_requests")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class HostRequest extends BaseUserEntity {
 
     // PK

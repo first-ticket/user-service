@@ -1,9 +1,9 @@
 package com.firstticket.userservice.domain;
 
-import com.firstticket.common.exception.BusinessException;
-import com.firstticket.userservice.domain.exception.UserErrorCode;
-
 import java.util.regex.Pattern;
+
+import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
 
 /**
  * 사용자 - 이메일 주소를 표현하는 VO
@@ -48,7 +48,7 @@ public record Email(String value) {
         if (value == null
             || value.length() > MAX_LENGTH
             || !EMAIL_PATTERN.matcher(value).matches()) {
-            throw new BusinessException(UserErrorCode.INVALID_EMAIL_FORMAT);
+            throw new UserException(UserErrorCode.INVALID_EMAIL_FORMAT);
         }
     }
 }

@@ -32,7 +32,7 @@ import java.util.UUID;
 @Table(name = "users")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA 전용 기본 생성자 (외부 사용 금지)
-@AllArgsConstructor(access = AccessLevel.PROTECTED) // create() 팩토리 메서드 전용 생성자
+@AllArgsConstructor(access = AccessLevel.PRIVATE) // create() 팩토리 메서드 전용 생성자
 public class User extends BaseUserEntity {
 
     //PK
@@ -54,7 +54,7 @@ public class User extends BaseUserEntity {
      * 로그인 시도시 비밀번호와 함께 사용됩니다.
      * 중복 가입 방지를 위해 unique 제약조건 적용
      */
-    @Column(name = "email", nullable = false, unique = true)
+    @Column(name = "email", nullable = false)
     private String email;
 
     /** 사용자 표시 이름 */

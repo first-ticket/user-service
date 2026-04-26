@@ -1,7 +1,7 @@
 package com.firstticket.userservice.domain;
 
-import com.firstticket.common.exception.BusinessException;
 import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
 
 /**
  * HOST 신청 상태 ENUM
@@ -49,7 +49,7 @@ public enum HostRequestStatus {
      */
     public void validateNext(HostRequestStatus next) {
         if (!canTransitionTo(next)) {
-            throw new BusinessException(UserErrorCode.INVALID_HOST_REQUEST_STATUS);
+            throw new UserException(UserErrorCode.INVALID_HOST_REQUEST_STATUS);
         }
     }
 }

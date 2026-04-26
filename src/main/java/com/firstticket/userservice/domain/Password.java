@@ -1,7 +1,7 @@
 package com.firstticket.userservice.domain;
 
-import com.firstticket.common.exception.BusinessException;
 import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
 
 /**
  * 평문 비밀번호를 표현하는 VO
@@ -33,10 +33,10 @@ public record Password(String value) {
     /** null, 빈 문자열, 길이 제약 위반 검증 */
     private static void validate(String value) {
         if (value == null || value.isBlank()) {
-            throw new BusinessException(UserErrorCode.INVALID_PASSWORD_FORMAT);
+            throw new UserException(UserErrorCode.INVALID_PASSWORD_FORMAT);
         }
         if (value.length() < MIN_LENGTH || value.length() > MAX_LENGTH) {
-            throw new BusinessException(UserErrorCode.INVALID_PASSWORD_FORMAT);
+            throw new UserException(UserErrorCode.INVALID_PASSWORD_FORMAT);
         }
     }
 

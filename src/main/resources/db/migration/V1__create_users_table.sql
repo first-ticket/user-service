@@ -12,8 +12,9 @@ CREATE TABLE users
     -- 로그인 토큰 검증 후 사용자 조회 시 사용
     keycloak_id VARCHAR(255) NOT NULL UNIQUE,
 
-    -- 이메일 주소, Email VO 로 형식 검증 후 저장, 중복 가입 방지 UNIQUE 제약조건
-    email VARCHAR(255) NOT NULL UNIQUE,
+    -- 이메일 주소, Email VO 로 형식 검증 후 저장
+    -- 대소문자 무관 중복 방지는 하단 uq_users_email_lower 인덱스가 담당
+    email VARCHAR(255) NOT NULL,
 
     -- 사용자 이름
     username VARCHAR(100) NOT NULL,

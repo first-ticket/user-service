@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -31,6 +32,7 @@ import java.util.UUID;
 @Table(name = "users")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA 전용 기본 생성자 (외부 사용 금지)
+@AllArgsConstructor(access = AccessLevel.PROTECTED) // create() 팩토리 메서드 전용 생성자
 public class User extends BaseUserEntity {
 
     //PK
@@ -77,18 +79,20 @@ public class User extends BaseUserEntity {
 
     /**
      * User 생성 팩토리 메서드
+     * - @AllArgsConstructor(PRIVATE)로 생성된 private 생성자를 사용
      * - role 은 CUSTOMER 로 고정 (최초 가입 시 항상 일반 사용자)
      * - status 는 ACTIVE 로 고정
      * - email 은 Email VO 를 받아 .value() 로 String 추출 -> 이미 검증된 값 보장
      */
     public static User create(String keycloakId, Email email, String username) {
-        User user = new User(); // protected 생성자 호출 (같은 클래스이므로 접근 가능)
-        user.keycloakId = keycloakId;
-        user.email = email.value(); // VO 에서 String 추출 - 형식 검증 완료된 String
-        user.username = username;
-        user.role = UserRole.CUSTOMER;  // 기본 역할
-        user.status = UserStatus.ACTIVE; // 기본 상태
-        return user;
+        return new User(
+            null,
+            keycloakId,
+            email.value(),
+            username,
+            UserRole.CUSTOMER,
+            UserStatus.ACTIVE
+        );
     }
 
     // 비즈니스 메서드

@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -29,7 +30,8 @@ import java.util.UUID;
 @Entity
 @Table(name = "host_requests")
 @Getter
-@NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA 전용 기본 생성자
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor(access = AccessLevel.PROTECTED)
 public class HostRequest extends BaseUserEntity {
 
     // PK
@@ -59,11 +61,12 @@ public class HostRequest extends BaseUserEntity {
      * status 는 항상 PENDING 으로 초기화됩니다.
      */
     public static HostRequest create(UUID userId) {
-        Objects.requireNonNull(userId, "userId UUID값은 null일 수 없습니다."); // null 조기 차단
-        HostRequest request = new HostRequest();
-        request.userId = userId;
-        request.status = HostRequestStatus.PENDING; // 초기 상태는 PENDING으로 고정
-        return request;
+        Objects.requireNonNull(userId, "userId UUID 값은 null 일 수 없습니다.");
+        return new HostRequest(
+            null,
+            userId,
+            HostRequestStatus.PENDING
+        );
     }
 
     // 비즈니스 메서드

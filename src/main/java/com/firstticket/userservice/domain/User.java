@@ -1,6 +1,7 @@
 package com.firstticket.userservice.domain;
 
 import com.firstticket.common.persistence.BaseUserEntity;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -96,6 +97,7 @@ public class User extends BaseUserEntity {
     }
 
     // 비즈니스 메서드
+
     /**
      * 계정 잠금
      * UserStatus.ACTIVE.validateNext(LOCKED) 를 통해 전이 가능 여부를 먼저 확인합니다.
@@ -140,5 +142,14 @@ public class User extends BaseUserEntity {
      */
     public void changeUsername(String newUsername) {
         this.username = newUsername;
+    }
+
+    /**
+     * 회원가입 등 인증 컨텍스트가 없는 요청에서는 JPA Auditing이 created_by를 채울 수 없습니다.
+     * 이 메서드는 Keycloak에서 발급한 자신의 UUID를 created_by로 명시적으로 주입합니다.
+     * (자기 자신이 생성한 계정이므로 의미상 정확)
+     */
+    public void initCreatedBy(UUID id) {
+        this.createdBy = id;
     }
 }

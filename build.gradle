@@ -41,6 +41,14 @@ repositories {
 			password = githubToken
 		}
 	}
+    maven {
+        // common-jpa: JPA 기본 엔티티, SecurityAuditorAware, CommonJpaAutoConfiguration
+        url = 'https://maven.pkg.github.com/first-ticket/common-jpa'
+        credentials {
+            username = githubUser
+            password = githubToken
+        }
+    }
 }
 
 ext {
@@ -65,10 +73,14 @@ configurations.all {
 }
 
 dependencies {
-	// ===== common 공통모듈 =====
-	// 제공 내용: GlobalExceptionHandler, JpaConfig(@EnableJpaAuditing, JPAQueryFactory),
-	// FeignConfig(X-User-Id 헤더 전파), WebConfig, BaseEntity, ApiResponse, BusinessException 등
-	implementation 'com.first-ticket:common:0.0.2-SNAPSHOT'
+    // ===== common 공통모듈 =====
+    // 제공 내용: GlobalExceptionHandler, FeignConfig(X-User-Id 헤더 전파), WebConfig, ApiResponse, BusinessException
+    implementation 'com.first-ticket:common:0.0.3-SNAPSHOT'
+
+    // ===== common-jpa 공통 JPA 모듈 =====
+    // 제공 내용: BaseEntity, BaseUserEntity, CommonJpaAutoConfiguration(@EnableJpaAuditing, JPAQueryFactory),
+    // SecurityAuditorAware(X-User-Id 헤더 기반 createdBy/updatedBy 자동 주입)
+    implementation 'com.first-ticket:common-jpa:0.0.1-SNAPSHOT'
 
 	// ===== Spring Boot Starters =====
 	implementation 'org.springframework.boot:spring-boot-starter-web' // MVC, Tomcat

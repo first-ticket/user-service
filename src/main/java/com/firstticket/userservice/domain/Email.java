@@ -1,5 +1,6 @@
 package com.firstticket.userservice.domain;
 
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 import com.firstticket.userservice.domain.exception.UserErrorCode;
@@ -34,7 +35,7 @@ public record Email(String value) {
             throw new UserException(UserErrorCode.INVALID_EMAIL_FORMAT);
         }
         // 2. 소문자 정규화 — DB LOWER(email) 제약과 일치
-        value = value.toLowerCase();
+        value = value.toLowerCase(Locale.ROOT);
         // 3. 정규화된 값 기준으로 나머지 검증
         validate(value);
     }

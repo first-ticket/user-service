@@ -12,6 +12,7 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * domain 계층의 KeycloakAuthService (Port) 의 Adapter 구현체
@@ -49,7 +50,18 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
                 throw new RuntimeException("Keycloak 사용자 ID 추출에 실패했습니다.");
             }
 
-            return location.substring(location.lastIndexOf('/') + 1);
+            String keycloakId = location.substring(location.lastIndexOf('/') + 1);
+
+            // Location 헤더에서 추출한 값이 유효한 UUID인지 검증
+            // 비정상 Keycloak 응답 시 다운스트림에서 원인 불명 예외가 발생하는 것을 방지
+            try {
+                UUID.fromString(keycloakId);
+            } catch (IllegalArgumentException e) {
+                log.error("Keycloak 사용자 ID 형식 오류 - keycloakId가 UUID가 아닙니다.");
+                throw new RuntimeException("Keycloak 사용자 ID 형식이 올바르지 않습니다.", e);
+            }
+
+            return keycloakId;
         }
     }
 

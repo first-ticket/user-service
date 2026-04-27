@@ -25,10 +25,18 @@ public record Email(String value) {
     private static final Pattern EMAIL_PATTERN =
         Pattern.compile("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
 
+
     // compact canonical constructor
     // new Email(), of(), Jackson 역직렬화 등 모든 생성 경로에서 반드시 실행됨 → 검증 우회 불가능
     public Email {
-        validate(value); // 생성 전에 검증
+        // 1. null/공백 체크 - 정규화 전에 선행
+        if (value == null || value.isBlank()) {
+            throw new UserException(UserErrorCode.INVALID_EMAIL_FORMAT);
+        }
+        // 2. 소문자 정규화 — DB LOWER(email) 제약과 일치
+        value = value.toLowerCase();
+        // 3. 정규화된 값 기준으로 나머지 검증
+        validate(value);
     }
 
     /**

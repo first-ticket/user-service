@@ -29,32 +29,28 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
     public String createUser(String email, String plainPassword, String username) {
         UserRepresentation user = buildUserRepresentation(email, plainPassword);
 
-        // Keycloak Admin REST API: POST /admin/realms/{realm}/users
-        Response response = keycloakAdminClient
+        try (Response response = keycloakAdminClient
             .realm(keycloakProperties.realm())
             .users()
-            .create(user);
+            .create(user)) {
 
-        // 409 Conflict: 이메일(username) 이미 Keycloak Realm 에 존재
-        if (response.getStatus() == Response.Status.CONFLICT.getStatusCode()) {
-            throw new UserException(UserErrorCode.DUPLICATE_EMAIL);
+            if (response.getStatus() == Response.Status.CONFLICT.getStatusCode()) {
+                throw new UserException(UserErrorCode.DUPLICATE_EMAIL);
+            }
+
+            if (response.getStatus() != Response.Status.CREATED.getStatusCode()) {
+                log.error("Keycloak 사용자 생성 실패 - status: {}", response.getStatus());
+                throw new RuntimeException("Keycloak 사용자 생성에 실패했습니다. 상태 코드: " + response.getStatus());
+            }
+
+            String location = response.getHeaderString("Location");
+            if (location == null || !location.contains("/")) {
+                log.error("Keycloak Location 헤더 파싱 실패 - location: {}", location);
+                throw new RuntimeException("Keycloak 사용자 ID 추출에 실패했습니다.");
+            }
+
+            return location.substring(location.lastIndexOf('/') + 1);
         }
-
-        // 201 이외 응답: Keycloak 서버 오류 등 예기치 못한 실패
-        if (response.getStatus() != Response.Status.CREATED.getStatusCode()) {
-            log.error("Keycloak 사용자 생성 실패 - status: {}, email: {}", response.getStatus(), email);
-            throw new RuntimeException("Keycloak 사용자 생성에 실패했습니다. 상태 코드: " + response.getStatus());
-        }
-
-        // 생성 성공 시 Location 헤더에서 keycloakId 추출
-        // Location: http://host/admin/realms/{realm}/users/{keycloakId}
-        String location = response.getHeaderString("Location");
-        if (location == null || !location.contains("/")) {
-            log.error("Keycloak Location 헤더 파싱 실패 - location: {}", location);
-            throw new RuntimeException("Keycloak 사용자 ID 추출에 실패했습니다.");
-        }
-
-        return location.substring(location.lastIndexOf('/') + 1); // 마지막 경로 세그먼트 = keycloakId
     }
 
     private UserRepresentation buildUserRepresentation(String email, String plainPassword) {

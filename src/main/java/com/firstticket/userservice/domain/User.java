@@ -147,9 +147,14 @@ public class User extends BaseUserEntity {
     /**
      * 회원가입 등 인증 컨텍스트가 없는 요청에서는 JPA Auditing이 created_by를 채울 수 없습니다.
      * 이 메서드는 Keycloak에서 발급한 자신의 UUID를 created_by로 명시적으로 주입합니다.
-     * (자기 자신이 생성한 계정이므로 의미상 정확)
      */
     public void initCreatedBy(UUID id) {
+        if (id == null) {
+            throw new IllegalArgumentException("createdBy는 null값을 허용하지 않습니다.");
+        }
+        if (this.createdBy != null) {
+            throw new IllegalStateException("createdBy는 이미 초기화되서 변경할 수 없습니다.");
+        }
         this.createdBy = id;
     }
 }

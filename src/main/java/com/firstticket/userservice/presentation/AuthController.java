@@ -57,6 +57,19 @@ public class AuthController {
         );
     }
 
+    /**
+     * 로그인 API
+     * Keycloak Resource Owner Password Credentials (ROPC) 흐름으로 토큰을 발급합니다.
+     *
+     * @param request email, password (모두 필수)
+     * @return 200 OK + { accessToken, refreshToken }
+     *         accessToken: API 호출 시 Authorization: Bearer {token} 헤더에 포함
+     *         refreshToken: 만료 시 POST /api/v1/auth/token/refresh 로 재발급
+     *
+     * 오류 응답:
+     *   400 Bad Request  — email / password 빈 값 (@NotBlank 위반)
+     *   401 Unauthorized — 잘못된 자격증명 (계정 없음, 비밀번호 불일치, LOCKED/DELETED 계정 포함)
+     */
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<TokenResponse>> login(
         @Valid @RequestBody LoginRequest request) {

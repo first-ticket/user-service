@@ -126,6 +126,15 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
                         UserErrorCode.INVALID_CREDENTIALS
                     );}
                 )
+                // 5xx Server Error -> Keycloak 서버 장애
+                // 400 등 기타 오류는 하단 catch에서 포착
+                .onStatus(
+                    status -> status.is5xxServerError(),
+                    (req, res) -> {
+                        log.error("Keycloak 서버 오류 - status: {}", res.getStatusCode());
+                        throw new RuntimeException("인증 서버에 일시적인 문제가 발생했습니다.");
+                    }
+                )
                 .body(KeycloakTokenResponse.class); // access token, refresh token 역직렬화
 
             if (response == null) {

@@ -24,11 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 설계 결정 사항
- * - Application 계층은 domain 객체를 조율하는 역할만 담당 (로직은 Entity/VO 에서)
- * - KeycloakAuthService는 Port 인터페이스를 통해 주입 (infrastructure 직접 의존 금지)
- * - @Transactional: DB작업의 원자성 보장
- *   Keycloak 성공 but DB작업 실패 시 고아 계정 발생 가능 → MVP 개발 완료 후 보완 필요
- * - login은 DB 조회만 하므로 readOnly = true로 최적화
+ * - Application 계층은 domain 객체를 조율하는 역할만 담당 (로직은 Entity / VO 에서)
+ * - KeycloakAuthService / RefreshTokenStore 는 Port 인터페이스를 통해 주입 (infrastructure 직접 의존 금지)
+ * - login()은 DB 조회만 수행하므로 readOnly = true 로 최적화 (Redis 쓰기는 JPA 트랜잭션과 무관하게 동작)
  */
 @Slf4j
 @Service

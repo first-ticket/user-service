@@ -1,13 +1,8 @@
 package com.firstticket.userservice.infrastructure.provider;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.firstticket.userservice.application.dto.result.TokenResult;
-import com.firstticket.userservice.domain.exception.UserErrorCode;
-import com.firstticket.userservice.domain.exception.UserException;
-import com.firstticket.userservice.domain.service.KeycloakAuthService;
-import jakarta.ws.rs.core.Response;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.util.List;
+import java.util.UUID;
+
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -17,8 +12,15 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
-import java.util.List;
-import java.util.UUID;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.firstticket.userservice.application.dto.result.TokenResult;
+import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
+import com.firstticket.userservice.domain.service.KeycloakAuthService;
+
+import jakarta.ws.rs.core.Response;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * domain 계층의 KeycloakAuthService (Port) 의 Adapter 구현체
@@ -121,10 +123,11 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
                 .retrieve()
                 // 401 Unauthorized > 자격증명 불일치
                 .onStatus(
-                    status -> status.value() == 401,
-                    (req, res) -> { throw new UserException(
-                        UserErrorCode.INVALID_CREDENTIALS
-                    );}
+                    status -> status.value() == 400 || status.value() == 401,
+                    (req, res) -> {
+                        log.warn("Keycloak 자격증명 오류 - status: {}", res.getStatusCode());
+                        throw new UserException(UserErrorCode.INVALID_CREDENTIALS);
+                    }
                 )
                 // 5xx Server Error -> Keycloak 서버 장애
                 // 400 등 기타 오류는 하단 catch에서 포착
@@ -143,13 +146,25 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
                 throw new RuntimeException("Keycloak 토큰 발급 응답이 올바르지 않습니다.");
             }
 
+            // [Issue 2 반영] accessToken / refreshToken null·blank 검증
+            // null이나 빈 토큰이 Redis에 저장되면 재발급 흐름에서 무결성 오류 발생
+            if (response.accessToken() == null || response.accessToken().isBlank()
+                || response.refreshToken() == null || response.refreshToken().isBlank()) {
+                log.error("Keycloak Token Endpoint 응답 토큰 필드 누락 - accessToken 존재:{}, refreshToken 존재:{}",
+                    response.accessToken() != null, response.refreshToken() != null);
+                throw new RuntimeException("Keycloak 토큰 발급 응답에 필수 토큰이 없습니다.");
+            }
+
             // Port 반환형인 TokenResult로 변환 후 반환
             return new TokenResult(response.accessToken(), response.refreshToken());
+
         } catch (UserException e) {
             // 자격증명 오류는 위에서 처리, 그대로 던짐
             throw e;
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
-            // 네트워크, 타임아웃 등 기타 예외 -> 로깅 후 RuntimeException으로
+            // 네트워크 오류, 타임아웃 등 checked 예외 → 로깅 후 RuntimeException으로 전환
             log.error("Keycloak Token Endpoint 호출 중 오류 발생", e);
             throw new RuntimeException("Keycloak 토큰 발급 중 오류가 발생했습니다.", e);
         }
@@ -162,5 +177,6 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
     private record KeycloakTokenResponse(
         @JsonProperty("access_token") String accessToken,
         @JsonProperty("refresh_token") String refreshToken
-    ) {}
+    ) {
+    }
 }

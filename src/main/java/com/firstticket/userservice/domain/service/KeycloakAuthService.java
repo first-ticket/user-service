@@ -1,5 +1,7 @@
 package com.firstticket.userservice.domain.service;
 
+import com.firstticket.userservice.application.dto.result.TokenResult;
+
 /**
  * Keycloak 사용자 계정 관리 Port (외부 서비스 추상화)
  *
@@ -12,4 +14,10 @@ public interface KeycloakAuthService {
 
     // Keycloak Realm에 사용자를 생성하고 발급된 keycloakId(sub UUID)를 반환
     String createUser(String email, String plainPassword, String username);
+
+    /**
+     * Keycloak Token Endpoint로 email/password 자격증명을 전달하여
+     * Access Token + Refresh Token 을 발급받습니다.
+     */
+    TokenResult login(String email, String password);
 }

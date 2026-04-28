@@ -289,3 +289,8 @@ gradle-app.setting
 .env
 .env.*
 !.env.example
+
+# Local Spring configuration files (민감 정보 포함, VCS 제외)
+**/application-local.yaml
+application-local.yaml
+application-local.yml

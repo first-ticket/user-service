@@ -289,3 +289,7 @@ gradle-app.setting
 .env
 .env.*
 !.env.example
+
+# application.yml
+application-local.yaml
+application-local.yml

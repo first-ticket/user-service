@@ -22,6 +22,6 @@ eureka:
 
 keycloak:
   server-url: ${KEYCLOAK_URL:http://localhost:8180}  # 로컬 Keycloak 주소
-  client-secret: ${KEYCLOAK_CLIENT_SECRET:}          # 로컬 클라이언트 시크릿
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:BT7NpwmEZN7kwclaQw01Y0RrFzNZiGRD}          # 로컬 클라이언트 시크릿
   admin-username: ${KEYCLOAK_ADMIN_USERNAME:admin}   # Keycloak Admin API 자격증명
   admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}

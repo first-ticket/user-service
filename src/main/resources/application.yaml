@@ -49,4 +49,4 @@ management:
 
 keycloak:
   realm: first-ticket # Keycloak Realm
-  client-id: ${KEYCLOAK_CLIENT_ID:user-service} # 클라이언트 ID
+  client-id: ${KEYCLOAK_CLIENT_ID:user-client} # 클라이언트 ID

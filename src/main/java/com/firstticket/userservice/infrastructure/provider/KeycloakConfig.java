@@ -5,6 +5,7 @@ import org.keycloak.admin.client.KeycloakBuilder;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestClient;
 
 /**
  * Keycloak Admin Client Bean 설정
@@ -35,5 +36,15 @@ public class KeycloakConfig {
             .username(properties.adminUsername())
             .password(properties.adminPassword())
             .build();
+    }
+
+    /**
+     * Keycloak Token Endpoint 호출용 RestClient 빈
+     *
+     * - baseUrl 미설정: URL 은 호출 시점에 동적으로 구성 (realm이 동적)
+     */
+    @Bean
+    public RestClient keycloakRestClient() {
+        return RestClient.create();
     }
 }

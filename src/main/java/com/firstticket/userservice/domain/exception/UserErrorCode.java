@@ -17,6 +17,9 @@ public enum UserErrorCode implements ErrorCode {
     INVALID_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "허용되지 않는 상태 전이입니다."),
     USER_ALREADY_DELETED(HttpStatus.GONE, "이미 삭제된 사용자입니다."),
 
+    // 로그인 실패
+    INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
+
     // ===== HostRequest =====
     HOST_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "HOST 신청 요청을 찾을 수 없습니다."),
     INVALID_HOST_REQUEST_STATUS(HttpStatus.BAD_REQUEST, "허용되지 않은 HOST 신청 상태 전이입니다."),

@@ -1,8 +1,14 @@
 package com.firstticket.userservice.infrastructure.provider;
 
-import java.util.List;
-import java.util.UUID;
-
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.firstticket.userservice.application.dto.result.TokenResult;
+import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
+import com.firstticket.userservice.domain.service.KeycloakAuthService;
+import jakarta.ws.rs.core.Response;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -12,15 +18,10 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.firstticket.userservice.application.dto.result.TokenResult;
-import com.firstticket.userservice.domain.exception.UserErrorCode;
-import com.firstticket.userservice.domain.exception.UserException;
-import com.firstticket.userservice.domain.service.KeycloakAuthService;
-
-import jakarta.ws.rs.core.Response;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * domain 계층의 KeycloakAuthService (Port) 의 Adapter 구현체
@@ -28,6 +29,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * createUser: Keycloak Admin Client (Admin REST API) -> 사용자 생성
  * login: RestClient -> Token Endpoint (ROPC)
+ * refreshToken: RestClient -> Token Endpoint (Refresh Token Grant)
+ * extractSubject: JWT payload Base64 디코딩 -> sub 클레임 추출
  */
 @Slf4j
 @Service
@@ -35,8 +38,9 @@ import lombok.extern.slf4j.Slf4j;
 public class KeycloakAuthServiceImpl implements KeycloakAuthService {
 
     private final Keycloak keycloakAdminClient;
-    private final RestClient keycloakRestClient; // Token Endpoint용 HTTP 클라이언트
+    private final RestClient keycloakRestClient;
     private final KeycloakProperties keycloakProperties;
+    private final ObjectMapper objectMapper;
 
     @Override
     public String createUser(String email, String plainPassword, String username) {
@@ -100,11 +104,7 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
     @Override
     public TokenResult login(String email, String password) {
         // Token Endpoint URL : {serverUrl}/realms/{realm}/protocol/openid-connect/token
-        String tokenUrl = String.format(
-            "%s/realms/%s/protocol/openid-connect/token",
-            keycloakProperties.serverUrl(),
-            keycloakProperties.realm()
-        );
+        String tokenUrl = buildTokenUrl();
 
         // OAuth2 Resource Owner Password Credentials Grant 요청 (ROPC)
         MultiValueMap<String, String> formBody = new LinkedMultiValueMap<>();
@@ -114,6 +114,34 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
         formBody.add("username", email);
         formBody.add("password", password); // 평문 패스워드 (TLS 보호)
 
+        return requestToken(tokenUrl, formBody, UserErrorCode.INVALID_CREDENTIALS);
+    }
+
+    @Override
+    public TokenResult refreshToken(String refreshToken) {
+        // Token Endpoint URL (login과 동일한 엔드포인트, grant_type만 다름)
+        String tokenUrl = buildTokenUrl();
+
+        // OAuth2 Refresh Token Grant 요청
+        MultiValueMap<String, String> formBody = new LinkedMultiValueMap<>();
+        formBody.add("grant_type", "refresh_token");
+        formBody.add("client_id", keycloakProperties.clientId());
+        formBody.add("client_secret", keycloakProperties.clientSecret());
+        formBody.add("refresh_token", refreshToken);
+
+        return requestToken(tokenUrl, formBody, UserErrorCode.INVALID_REFRESH_TOKEN);
+    }
+
+    /**
+     * Keycloak Token Endpoint 공통 호출 로직
+     *
+     * 설계 결정 사항
+     * - login()과 refreshToken()은 동일한 Token Endpoint를 호출하므로 공통 메서드로 추출
+     * - 4xx 오류 시 던질 에러 코드를 파라미터로 받아 호출자가 의미를 결정합니다.
+     *   (login → INVALID_CREDENTIALS, refreshToken → INVALID_REFRESH_TOKEN)
+     */
+    private TokenResult requestToken(String tokenUrl, MultiValueMap<String, String> formBody,
+        UserErrorCode credentialErrorCode) {
         try {
             // Content-Type: application/x-www-form-urlencoded로 Token Endpoint 호출
             KeycloakTokenResponse response = keycloakRestClient.post()
@@ -121,16 +149,14 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(formBody)
                 .retrieve()
-                // 401 Unauthorized > 자격증명 불일치
                 .onStatus(
                     status -> status.value() == 400 || status.value() == 401,
                     (req, res) -> {
                         log.warn("Keycloak 자격증명 오류 - status: {}", res.getStatusCode());
-                        throw new UserException(UserErrorCode.INVALID_CREDENTIALS);
+                        throw new UserException(credentialErrorCode);
                     }
                 )
                 // 5xx Server Error -> Keycloak 서버 장애
-                // 400 등 기타 오류는 하단 catch에서 포착
                 .onStatus(
                     status -> status.is5xxServerError(),
                     (req, res) -> {
@@ -140,13 +166,12 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
                 )
                 .body(KeycloakTokenResponse.class); // access token, refresh token 역직렬화
 
+            // 정상 응답이지만 body가 없는 비정상 케이스 방어
             if (response == null) {
-                // 정상 응답이지만 body가 없는 비정상 케이스 방어
                 log.error("Keycloak Token Endpoint 응답 body가 null입니다.");
                 throw new RuntimeException("Keycloak 토큰 발급 응답이 올바르지 않습니다.");
             }
 
-            // [Issue 2 반영] accessToken / refreshToken null·blank 검증
             // null이나 빈 토큰이 Redis에 저장되면 재발급 흐름에서 무결성 오류 발생
             if (response.accessToken() == null || response.accessToken().isBlank()
                 || response.refreshToken() == null || response.refreshToken().isBlank()) {
@@ -164,10 +189,55 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            // 네트워크 오류, 타임아웃 등 checked 예외 → 로깅 후 RuntimeException으로 전환
+            // 네트워크 오류, 타임아웃 등 checked 예외 -> 로깅 후 RuntimeException으로 전환
             log.error("Keycloak Token Endpoint 호출 중 오류 발생", e);
             throw new RuntimeException("Keycloak 토큰 발급 중 오류가 발생했습니다.", e);
         }
+    }
+
+    @Override
+    public String extractSubject(String jwtToken) {
+        // JWT 구조: {header}.{payload}.{signature} (각 파트는 Base64URL 인코딩)
+        try {
+            String[] parts = jwtToken.split("\\.");
+            if (parts.length != 3) {
+                // JWT 형식이 아닌 토큰 또는 변조된 토큰 필터링
+                throw new UserException(UserErrorCode.INVALID_REFRESH_TOKEN);
+            }
+
+            // JWT Base64URL은 패딩(=) 없이 인코딩됨 → Java 디코더 호환을 위해 패딩 복원
+            String paddedPayload = addPadding(parts[1]);
+            byte[] payloadBytes = Base64.getUrlDecoder().decode(paddedPayload);
+
+            // payload JSON에서 sub 클레임 추출
+            @SuppressWarnings("unchecked")
+            Map<String, Object> claims = objectMapper.readValue(payloadBytes, Map.class);
+            String sub = (String) claims.get("sub");
+
+            if (sub == null || sub.isBlank()) {
+                log.warn("Refresh Token sub 클레임이 존재하지 않습니다.");
+                throw new UserException(UserErrorCode.INVALID_REFRESH_TOKEN);
+            }
+            return sub;
+        } catch (UserException e) {
+            throw e;
+        } catch (Exception e) {
+            // Base64 디코딩 실패, JSON 파싱 실패 등 -> 변조 또는 잘못된 형식의 토큰
+            log.warn("Refresh Token sub 클레임 추출 실패 - 토큰 형식 오류", e);
+            throw new UserException(UserErrorCode.INVALID_REFRESH_TOKEN);
+        }
+    }
+
+    /**
+     * Base64URL 문자열에 JWT 표준에서 생략된 패딩(=)을 복원합니다.
+     * Java의 Base64.getUrlDecoder()는 패딩이 있어야 정상 동작하므로 필요합니다.
+     */
+    private String addPadding(String base64Url) {
+        // base64url 인코딩된 문자열 길이는 4의 배수여야 함
+        int remainder = base64Url.length() % 4;
+        if (remainder == 2) return base64Url + "=="; // 2글자 부족
+        if (remainder == 3) return base64Url + "=";  // 1글자 부족
+        return base64Url;
     }
 
     /**
@@ -177,6 +247,17 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
     private record KeycloakTokenResponse(
         @JsonProperty("access_token") String accessToken,
         @JsonProperty("refresh_token") String refreshToken
-    ) {
+    ) {}
+
+    /**
+     * Keycloak Token Endpoint URL을 생성합니다.
+     * login, refreshToken 두 메서드에서 동일하게 사용합니다.
+     */
+    private String buildTokenUrl() {
+        return String.format(
+            "%s/realms/%s/protocol/openid-connect/token",
+            keycloakProperties.serverUrl(),
+            keycloakProperties.realm()
+        );
     }
 }

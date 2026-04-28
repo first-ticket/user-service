@@ -22,4 +22,14 @@ public interface RefreshTokenStore {
 
     // Refresh Token 삭제 (로그아웃, 재발급 후 기존 토큰 무효화 로직)
     void delete(UUID userId);
+
+    // 기존 rotate(newToken) 제거 -> CAS 방식으로 교체
+    // oldToken 일치 확인 + 신규 토큰 저장을 Redis에서 원자적으로 처리
+    RotateResult rotate(UUID userId, String oldToken, String newToken);
+
+    enum RotateResult {
+        SUCCESS, // 정상 교체
+        NOT_FOUND, // 키 없음 (로그아웃 or TTL 만료)
+        TOKEN_MISMATCH // 토큰 불일치 (재사용 공격 의심)
+    }
 }

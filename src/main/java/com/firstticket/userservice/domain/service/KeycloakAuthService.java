@@ -20,4 +20,16 @@ public interface KeycloakAuthService {
      * Access Token + Refresh Token 을 발급받습니다.
      */
     TokenResult login(String email, String password);
+
+    TokenResult refreshToken(String refreshToken);
+
+    /**
+     * JWT 토큰 payload에서 sub(subject) 클레임 추출
+     *
+     * 설계 결정 사항
+     * - PUBLIC 엔드포인트 (/token/refresh)에서는 Gateway X-User-Id 헤더가 없으므로
+     * - Refresh Token JWT payload를 직접 디코딩하여 keycloakId를 추출합니다.
+     * - 서명 검은은 이후 keycloak refreshToken() 호출 시 keycloak이 담당
+     */
+    String extractSubject(String jwtToken);
 }

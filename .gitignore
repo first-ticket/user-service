@@ -291,5 +291,6 @@ gradle-app.setting
 !.env.example
 
 # application.yml
+**/application-local.yaml
 application-local.yaml
 application-local.yml

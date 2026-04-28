@@ -1,6 +1,6 @@
 package com.firstticket.userservice.domain;
 
-import com.firstticket.common.exception.BusinessException;
+import com.firstticket.userservice.domain.exception.UserException;
 import com.firstticket.userservice.domain.exception.UserErrorCode;
 
 /**
@@ -48,12 +48,12 @@ public enum UserStatus {
 
     /**
      * 전이 유효성 검증 메서드
-     * 불가능한 전이라면 BusinessException(INVALID_STATUS_TRANSITION) 던짐
+     * 불가능한 전이라면 UserException(INVALID_STATUS_TRANSITION) 던짐
      * User Entity 의 lock(), unlock(), softDelete() 등 상태 변경 메서드에서 사용 및 호출
      */
     public void validateNext(UserStatus next) {
         if (!canTransitionTo(next)) {
-            throw new BusinessException(UserErrorCode.INVALID_STATUS_TRANSITION);
+            throw new UserException(UserErrorCode.INVALID_STATUS_TRANSITION);
         }
     }
 }

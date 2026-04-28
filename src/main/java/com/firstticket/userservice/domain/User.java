@@ -1,6 +1,7 @@
 package com.firstticket.userservice.domain;
 
 import com.firstticket.common.persistence.BaseUserEntity;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -32,7 +33,7 @@ import java.util.UUID;
 @Table(name = "users")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA 전용 기본 생성자 (외부 사용 금지)
-@AllArgsConstructor(access = AccessLevel.PROTECTED) // create() 팩토리 메서드 전용 생성자
+@AllArgsConstructor(access = AccessLevel.PRIVATE) // create() 팩토리 메서드 전용 생성자
 public class User extends BaseUserEntity {
 
     //PK
@@ -54,7 +55,7 @@ public class User extends BaseUserEntity {
      * 로그인 시도시 비밀번호와 함께 사용됩니다.
      * 중복 가입 방지를 위해 unique 제약조건 적용
      */
-    @Column(name = "email", nullable = false, unique = true)
+    @Column(name = "email", nullable = false)
     private String email;
 
     /** 사용자 표시 이름 */
@@ -96,6 +97,7 @@ public class User extends BaseUserEntity {
     }
 
     // 비즈니스 메서드
+
     /**
      * 계정 잠금
      * UserStatus.ACTIVE.validateNext(LOCKED) 를 통해 전이 가능 여부를 먼저 확인합니다.
@@ -140,5 +142,19 @@ public class User extends BaseUserEntity {
      */
     public void changeUsername(String newUsername) {
         this.username = newUsername;
+    }
+
+    /**
+     * 회원가입 등 인증 컨텍스트가 없는 요청에서는 JPA Auditing이 created_by를 채울 수 없습니다.
+     * 이 메서드는 Keycloak에서 발급한 자신의 UUID를 created_by로 명시적으로 주입합니다.
+     */
+    public void initCreatedBy(UUID id) {
+        if (id == null) {
+            throw new IllegalArgumentException("createdBy는 null값을 허용하지 않습니다.");
+        }
+        if (this.createdBy != null) {
+            throw new IllegalStateException("createdBy는 이미 초기화되서 변경할 수 없습니다.");
+        }
+        this.createdBy = id;
     }
 }

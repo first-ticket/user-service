@@ -16,6 +16,7 @@ import com.firstticket.userservice.domain.exception.UserErrorCode;
 import com.firstticket.userservice.domain.exception.UserException;
 import com.firstticket.userservice.domain.service.KeycloakAuthService;
 import com.firstticket.userservice.domain.service.RefreshTokenStore;
+import com.firstticket.userservice.domain.service.RefreshTokenStore.RotateResult; // ← 추가
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,23 +45,23 @@ public class UserCommandService {
      * 처리 흐름
      * 1. VO 생성 → Email / Password 형식 검증 (실패 시 400 Bad Request)
      * 2. 이메일 중복 확인 (실패 시 409 Conflict)
-     * 3. Keycloak 계정 생성 -> 비밀번호 해시 처리 위임, keycloakId 수신
+     * 3. Keycloak 계정 생성 → 비밀번호 해시 처리 위임, keycloakId 수신
      * 4. User Entity 생성 / DB 저장
      * 5. UserResult 반환
      */
     @Transactional
     public UserResult signup(SignupCommand command) {
-        // 1. VO 생성 (VO 생성자에서 형식 검증 - 실패 시 UserException 발생 → 400)
+        // 1. VO 생성 (VO 생성자에서 형식 검증 — 실패 시 UserException 발생 → 400)
         Email email = Email.of(command.email());
         Password password = Password.of(command.password()); // 검증 후 Keycloak에 전달하고 버림
 
-        // 2. 이메일 중복 확인 (DB 레벨에서 우선 차단 - Keycloak 호출 전에 확인하여 불필요한 외부 호출 방지)
+        // 2. 이메일 중복 확인 (DB 레벨에서 우선 차단 — Keycloak 호출 전에 확인하여 불필요한 외부 호출 방지)
         if (userRepository.existsByEmail(email.value())) {
             throw new UserException(UserErrorCode.DUPLICATE_EMAIL);
         }
 
         // 3. Keycloak Admin Client를 통해 Realm에 사용자 생성 (비밀번호 해시 처리 위임)
-        // keycloakId = Keycloak 이 발급한 사용자 UUID (JWT sub claim 과 동일)
+        // keycloakId = Keycloak이 발급한 사용자 UUID (JWT sub claim과 동일)
         String keycloakId = keycloakAuthService.createUser(
             email.value(),
             password.value(),
@@ -70,7 +71,7 @@ public class UserCommandService {
         // 4. User 엔티티 생성 (role: CUSTOMER 고정, status: ACTIVE 고정)
         User user = User.create(keycloakId, email, command.username());
 
-        // Keycloak 에서 받은 자신의 UUID 를 created_by 에 직접 주입
+        // Keycloak에서 받은 자신의 UUID를 created_by에 직접 주입
         user.initCreatedBy(UUID.fromString(keycloakId));
 
         // 5. DB 저장 후 Result DTO 반환
@@ -82,7 +83,7 @@ public class UserCommandService {
      * 로그인
      * 처리 흐름
      * 1. 이메일로 DB에서 사용자 조회 (없으면 401)
-     * 2. 계정 상태 검증 - ACTIVE 이외에는 로그인 거부
+     * 2. 계정 상태 검증 — ACTIVE 이외에는 로그인 거부
      * 3. Keycloak ROPC 호출 → Access Token + Refresh Token 발급
      * 4. Refresh Token Redis 저장
      * 5. TokenResult 반환
@@ -96,8 +97,8 @@ public class UserCommandService {
                 return new UserException(UserErrorCode.INVALID_CREDENTIALS);
             });
 
-        // 2. 계정 상태 검증 : 'ACTIVE' 이외에는 로그인 실패
-        // LOCKED: 잠김 / DELETED : 탈퇴처리
+        // 2. 계정 상태 검증: ACTIVE 이외에는 로그인 실패
+        // LOCKED: 잠김 / DELETED: 탈퇴 처리
         if (user.getStatus() != UserStatus.ACTIVE) {
             log.warn("[login] 계정 비활성 상태 - userId: {}, status: {}", user.getId(), user.getStatus());
             throw new UserException(UserErrorCode.INVALID_CREDENTIALS);
@@ -140,17 +141,18 @@ public class UserCommandService {
     /**
      * 토큰 재발급 (Token Rotation)
      * 처리 흐름
-     * 1. Refresh Token JWT payload에서 sub(keycloakId) 추출 (서명 검증 없이 payload만 디코딩)
-     * 2. keycloakId로 사용자 조회 + 상태 확인 (ACTIVE 필수)
-     * 3. Redis에서 저장된 Refresh Token 조회 → 없으면 로그아웃된 세션
-     * 4. 제공된 토큰 vs 저장된 토큰 비교 → 불일치 시 재사용 공격으로 간주하여 세션 전체 무효화
-     * 5. Keycloak에 Refresh Token Grant 요청 → 신규 토큰 쌍 발급
-     * 6. Redis rotate → 신규 Refresh Token으로 교체
-     * 7. 새 토큰 반환
+     * 1. Refresh Token JWT payload에서 sub(keycloakId) 추출
+     *    ⚠서명 검증 없이 payload만 디코딩 - 사용자 식별용 라우팅 힌트로만 사용
+     *    실제 토큰 유효성 검증은 Keycloak refreshToken() 호출에서 수행
+     * 2. keycloakId로 사용자 조회 + ACTIVE 상태 확인
+     * 3. Keycloak에 신규 토큰 발급 요청
+     * 4. Redis Lua CAS rotate - oldToken 검증 + newToken 교체를 원자적으로 처리
+     *    (동시 요청 시 하나만 성공, 불일치 시 세션 삭제 없이 예외만 반환)
+     * 5. 새 토큰 반환
      */
     @Transactional(readOnly = true)
     public TokenResult refreshToken(RefreshTokenCommand command) {
-        // 1. Refresh Token JWT payload에서 sub 추출
+        // 1. Refresh Token JWT payload에서 sub 추출 (서명 검증 없음 — 라우팅 힌트용)
         String keycloakId = keycloakAuthService.extractSubject(command.refreshToken());
 
         // 2. keycloakId로 사용자 조회
@@ -166,30 +168,31 @@ public class UserCommandService {
             throw new UserException(UserErrorCode.INVALID_REFRESH_TOKEN);
         }
 
-        // 3. Redis에서 저장된 Refresh Token 조회
-        // 토큰이 없다면 로그아웃 또는 TTL 만료 -> 재로그인 필요
-        String storedToken = refreshTokenStore.find(user.getId())
-            .orElseThrow(() -> {
-                log.warn("[refreshToken] Redis에 토큰 없음 (로그아웃 또는 만료) - userId: {}", user.getId());
-                return new UserException(UserErrorCode.INVALID_REFRESH_TOKEN);
-            });
-
-        // 4. 제공된 토큰과 저장된 토큰 비교
-        // 불일치: 이미 rotate된 구 토큰을 사용하는 경우 → 탈취 의심
-        // 대응: 기존 세션을 즉시 무효화하여 피해 최소화 (합법 사용자도 재로그인 필요)
-        if (!storedToken.equals(command.refreshToken())) {
-            log.warn("[refreshToken] 토큰 불일치 감지 - 재사용 공격 의심, 세션 무효화. userId: {}", user.getId());
-            refreshTokenStore.delete(user.getId()); // 기존 세션 강제 종료
-            throw new UserException(UserErrorCode.INVALID_REFRESH_TOKEN);
-        }
-
-        // 5. Keycloak에 신규 토큰 발급 요청 (Keycloak이 기존 Refresh Token을 자동 무효화)
+        // 3. Keycloak 신규 토큰 발급 (Keycloak이 refreshToken 서명/만료 검증 담당)
         TokenResult newTokens = keycloakAuthService.refreshToken(command.refreshToken());
 
-        // 6. Redis에 신규 Refresh Token으로 교체 (원자적 덮어쓰기)
-        refreshTokenStore.rotate(user.getId(), newTokens.refreshToken());
+        // 4. Redis Lua CAS rotate - 원자적으로 oldToken 검증 + newToken 교체
+        // 동시 요청이 두 개 들어와도 하나만 성공하도록 보장
+        RotateResult rotateResult = refreshTokenStore.rotate(
+            user.getId(),
+            command.refreshToken(),   // oldToken
+            newTokens.refreshToken()  // newToken
+        );
 
-        // 7. 새로 발급된 토큰 반환
+        switch (rotateResult) {
+            case NOT_FOUND -> {
+                // 로그아웃 또는 TTL 만료 - 재로그인 필요
+                log.warn("[refreshToken] Redis 토큰 없음 (로그아웃 or 만료) - userId: {}", user.getId());
+                throw new UserException(UserErrorCode.INVALID_REFRESH_TOKEN);
+            }
+            case TOKEN_MISMATCH -> {
+                // 이미 rotate된 구 토큰 사용 - 재사용 공격 의심
+                log.warn("[refreshToken] 토큰 불일치 감지 - 재사용 공격 의심. userId: {}", user.getId());
+                throw new UserException(UserErrorCode.INVALID_REFRESH_TOKEN);
+            }
+            case SUCCESS -> log.info("[refreshToken] 토큰 재발급 성공 - userId: {}", user.getId());
+        }
+
         return newTokens;
     }
 }

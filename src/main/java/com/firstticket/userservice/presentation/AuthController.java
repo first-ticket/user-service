@@ -20,16 +20,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * Auth(인증) 관련 API 컨트롤러
- * Gateway SecurityConfig의 PUBLIC_PATHS에 등록된 경로 담당 (인증 불필요)
- *
- * 담당 엔드포인트:
- *   POST /api/v1/auth/signup         - 회원가입
- *   POST /api/v1/auth/login          - 로그인
- *   POST /api/v1/auth/logout         - 로그아웃 (X-User-Id 헤더 필요)
- *   POST /api/v1/auth/token/refresh  - 토큰 재발급 (PUBLIC — 인증 불필요)
- */
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor

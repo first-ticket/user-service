@@ -15,6 +15,7 @@ public enum UserSuccessCode implements SuccessCode {
 
     USER_CREATED(HttpStatus.CREATED, "회원가입이 완료되었습니다."), // 201
     LOGIN_SUCCESS(HttpStatus.OK, "로그인 성공"), // 200
+    TOKEN_REFRESHED(HttpStatus.OK, "토큰이 재발급되었습니다."), // 200
     USER_FOUND(HttpStatus.OK, "사용자 정보를 조회했습니다."); // 200
 
     private final HttpStatus status;

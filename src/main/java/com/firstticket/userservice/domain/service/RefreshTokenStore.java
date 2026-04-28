@@ -22,4 +22,8 @@ public interface RefreshTokenStore {
 
     // Refresh Token 삭제 (로그아웃, 재발급 후 기존 토큰 무효화 로직)
     void delete(UUID userId);
+
+    // Token Rotation : 기존 Refresh Token을 신규 토큰으로 교체
+    // 동일 키를 단일 SET 명령으로 덮어씀. (TTL도 갱신)
+    void rotate(UUID userId, String newRefreshToken);
 }

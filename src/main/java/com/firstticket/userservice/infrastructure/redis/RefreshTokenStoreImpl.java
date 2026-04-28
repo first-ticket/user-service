@@ -64,4 +64,15 @@ public class RefreshTokenStoreImpl implements RefreshTokenStore {
     public void delete(UUID userId) {
         redisTemplate.delete(KEY_PREFIX + userId);
     }
+
+    /**
+     * Token Rotation
+     *
+     * 설계 결정 사항
+     * - 동일 키 ("refresh:{userId}")를 Redis SET 단일 명령으로 덮어씀
+     */
+    @Override
+    public void rotate(UUID userId, String newRefreshToken) {
+        save(userId, newRefreshToken);
+    }
 }

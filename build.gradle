@@ -75,7 +75,7 @@ configurations.all {
 dependencies {
     // ===== common 공통모듈 =====
     // 제공 내용: GlobalExceptionHandler, FeignConfig(X-User-Id 헤더 전파), WebConfig, ApiResponse, BusinessException
-    implementation 'com.first-ticket:common:0.0.3-SNAPSHOT'
+    implementation 'com.first-ticket:common:0.0.4-SNAPSHOT'
 
     // ===== common-jpa 공통 JPA 모듈 =====
     // 제공 내용: BaseEntity, BaseUserEntity, CommonJpaAutoConfiguration(@EnableJpaAuditing, JPAQueryFactory),

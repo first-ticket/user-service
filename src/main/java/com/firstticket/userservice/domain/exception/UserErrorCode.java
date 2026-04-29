@@ -26,7 +26,10 @@ public enum UserErrorCode implements ErrorCode {
     HOST_REQUEST_ALREADY_PENDING(HttpStatus.CONFLICT, "이미 검토 중인 HOST 신청이 존재합니다."),
 
     // Token
-    INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다.");
+    INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."),
+
+    // Keycloak
+    ROLE_ASSIGN_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "사용자 권한 설정에 실패했습니다.");
 
     private final HttpStatus status;
     private final String message;

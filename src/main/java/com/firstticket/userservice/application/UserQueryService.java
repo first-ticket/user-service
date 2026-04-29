@@ -36,15 +36,24 @@ public class UserQueryService {
 
         User user = userRepository.findByKeycloakId(keycloakId.toString())
             .orElseThrow(() -> {
-                log.warn("[getMyInfo] 존재하지 않는 사용자 - keycloakId: {}", keycloakId);
+                log.warn("[getMyInfo] 존재하지 않는 사용자 - keycloakId: {}", mask(keycloakId));
                 return new UserException(UserErrorCode.USER_NOT_FOUND);
             });
 
         if (user.getStatus() == UserStatus.DELETED) {
-            log.warn("[getMyInfo] 탈퇴한 사용자 조회 시도 - keycloakId: {}", keycloakId);
+            log.warn("[getMyInfo] 탈퇴한 사용자 조회 시도 - keycloakId: {}", mask(keycloakId));
             throw new UserException(UserErrorCode.USER_NOT_FOUND);
         }
 
         return UserResult.from(user);
+    }
+
+    /**
+     * UUID 마스킹 - 운영 로그에서 사용자 식별자 원문 노출 방지
+     * 앞 8자리와 뒤 12자리만 노출: xxxxxxxx-****-****-****-xxxxxxxxxxxx
+     */
+    private String mask(UUID uuid) {
+        String s = uuid.toString(); // xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        return s.substring(0, 8) + "-****-****-****-" + s.substring(24);
     }
 }

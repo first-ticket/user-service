@@ -83,7 +83,25 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
             // CUSTOMER 역할 할당
             // 신규 가입자는 항상 CUSTOMER로 시작 - HOST 승격은 별도 API(HostRequest 승인)에서 처리
             // Keycloak realm에 CUSTOMER role이 존재해야 하며, 없으면 NotFoundException 발생
-            assignRealmRole(keycloakId, "CUSTOMER");
+            try {
+                assignRealmRole(keycloakId, "CUSTOMER");
+            } catch (UserException roleException) {
+                // 보상 처리: 역할 부여 실패 시 생성된 Keycloak 사용자 정리
+                // Keycloak만 생성되고 DB 트랜잭션은 롤백되므로 고아 계정이 남지 않도록 처리
+                try {
+                    keycloakAdminClient
+                        .realm(keycloakProperties.realm())
+                        .users()
+                        .get(keycloakId)
+                        .remove();
+                    log.warn("역할 부여 실패로 Keycloak 사용자 롤백 삭제 완료 - keycloakId: {}", keycloakId);
+                } catch (Exception cleanupException) {
+                    // 롤백마저 실패 시 → 고아 계정 발생, 운영팀 수동 정리 필요
+                    log.error("Keycloak 사용자 롤백 삭제 실패 - 수동 정리 필요 keycloakId: {}", keycloakId, cleanupException);
+                    roleException.addSuppressed(cleanupException);
+                }
+                throw roleException;
+            }
 
             return keycloakId;
         }
@@ -98,14 +116,12 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
      */
     private void assignRealmRole(String keycloakId, String roleName) {
         try {
-            // realm에 정의된 역할 조회 — 역할이 없으면 Keycloak이 NotFoundException 발생
             RoleRepresentation role = keycloakAdminClient
                 .realm(keycloakProperties.realm())
                 .roles()
                 .get(roleName)
                 .toRepresentation();
 
-            // 사용자에게 realm 역할 추가
             keycloakAdminClient
                 .realm(keycloakProperties.realm())
                 .users()
@@ -117,10 +133,9 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
             log.info("Keycloak 역할 할당 완료 - keycloakId: {}, role: {}", keycloakId, roleName);
 
         } catch (Exception e) {
-            // 역할 할당 실패 시 사용자는 생성됐지만 역할이 없는 불완전 상태
-            // 고아 계정 정리는 추후 보상 트랜잭션에서 처리 예정 (MVP 범위 외)
+            // 인프라 예외를 도메인 예외로 변환 — 인프라 예외가 상위 계층까지 전파되지 않도록 차단
             log.error("Keycloak 역할 할당 실패 - keycloakId: {}, role: {}", keycloakId, roleName, e);
-            throw new RuntimeException("Keycloak 역할 할당에 실패했습니다.", e);
+            throw new UserException(UserErrorCode.ROLE_ASSIGN_FAILED);
         }
     }
 

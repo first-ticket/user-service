@@ -2,20 +2,19 @@ package com.firstticket.userservice.presentation;
 
 import java.util.UUID;
 
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.firstticket.common.response.ApiResponse;
 import com.firstticket.common.web.AuthContext;
 import com.firstticket.userservice.application.UserQueryService;
 import com.firstticket.userservice.application.dto.result.UserResult;
 import com.firstticket.userservice.presentation.dto.response.UserResponse;
 
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 사용자 정보 컨트롤러

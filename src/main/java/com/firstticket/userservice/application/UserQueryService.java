@@ -8,10 +8,15 @@ import com.firstticket.userservice.domain.UserRepository;
 import com.firstticket.userservice.domain.UserStatus;
 import com.firstticket.userservice.domain.exception.UserErrorCode;
 import com.firstticket.userservice.domain.exception.UserException;
+import com.firstticket.userservice.domain.query.UserQueryRepository;
+import com.firstticket.userservice.domain.query.UserSearchSpec;
+import com.firstticket.userservice.domain.query.UserSummaryData;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserQueryService {
 
     private final UserRepository userRepository;
+    private final UserQueryRepository userQueryRepository;
 
     public UserResult getMyInfo(UUID keycloakId) {
 
@@ -46,6 +52,21 @@ public class UserQueryService {
         }
 
         return UserResult.from(user);
+    }
+
+    // ADMIN 사용자 단건 조회
+    public UserSummaryData getUserById(UUID userId) {
+        return userQueryRepository.findSummaryById(userId)
+            .orElseThrow(() -> {
+                log.warn("[getUserById] 존재하지 않는 사용자 - userId: {}", userId);
+                return new UserException(UserErrorCode.USER_NOT_FOUND);
+            });
+    }
+
+    // ADMIN 사용자 목록 조회 (Querydsl 동적 검색 + 페이지네이션)
+    public Page<UserSummaryData> getUsers(UserSearchSpec spec, Pageable pageable) {
+        // UserQueryRepositoryImpl(Querydsl)에게 동적 쿼리 실행 위임
+        return userQueryRepository.searchUsers(spec, pageable);
     }
 
     /**

@@ -44,7 +44,7 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
     private final ObjectMapper objectMapper;
 
     @Override
-    public String createUser(String email, String plainPassword, String username) {
+    public String createUser(String email, String plainPassword, String roleName) {
         UserRepresentation user = buildUserRepresentation(email, plainPassword);
 
         try (Response response = keycloakAdminClient
@@ -80,14 +80,12 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
                 throw new RuntimeException("Keycloak 사용자 ID 형식이 올바르지 않습니다.", e);
             }
 
-            // CUSTOMER 역할 할당
-            // 신규 가입자는 항상 CUSTOMER로 시작 - HOST 승격은 별도 API(HostRequest 승인)에서 처리
-            // Keycloak realm에 CUSTOMER role이 존재해야 하며, 없으면 NotFoundException 발생
+            // roleName 파라미터로 역할 할당 (기존 "CUSTOMER" 하드코딩 제거)
+            // signup()은 항상 "CUSTOMER"를 전달, 시드 API는 "HOST"/"ADMIN" 등을 전달
             try {
-                assignRealmRole(keycloakId, "CUSTOMER");
+                assignRealmRole(keycloakId, roleName);
             } catch (UserException roleException) {
                 // 보상 처리: 역할 부여 실패 시 생성된 Keycloak 사용자 정리
-                // Keycloak만 생성되고 DB 트랜잭션은 롤백되므로 고아 계정이 남지 않도록 처리
                 try {
                     keycloakAdminClient
                         .realm(keycloakProperties.realm())
@@ -96,7 +94,6 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
                         .remove();
                     log.warn("역할 부여 실패로 Keycloak 사용자 롤백 삭제 완료 - keycloakId: {}", keycloakId);
                 } catch (Exception cleanupException) {
-                    // 롤백마저 실패 시 → 고아 계정 발생, 운영팀 수동 정리 필요
                     log.error("Keycloak 사용자 롤백 삭제 실패 - 수동 정리 필요 keycloakId: {}", keycloakId, cleanupException);
                     roleException.addSuppressed(cleanupException);
                 }
@@ -315,4 +312,80 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
             keycloakProperties.realm()
         );
     }
+
+    /**
+     * Keycloak 사용자 계정 비활성화
+     *
+     * Admin Client로 UserRepresentation을 가져와 enabled = false 로 업데이트합니다.
+     * Keycloak은 비활성화된 계정으로는 로그인/토큰 발급이 불가능합니다.
+     *
+     * @throws UserException KEYCLOAK_USER_DISABLE_FAILED - 비활성화 API 호출 실패 시
+     */
+    @Override
+    public void disableUser(String keycloakId) {
+        try {
+            // 1. 현재 UserRepresentation 조회 (enabled 필드를 포함한 전체 객체가 필요)
+            UserRepresentation userRepresentation = keycloakAdminClient
+                .realm(keycloakProperties.realm())
+                .users()
+                .get(keycloakId)
+                .toRepresentation();
+
+            // 2. enabled 플래그를 false로 변경
+            userRepresentation.setEnabled(false);
+
+            // 3. Keycloak에 업데이트 요청 (PUT /admin/realms/{realm}/users/{id})
+            keycloakAdminClient
+                .realm(keycloakProperties.realm())
+                .users()
+                .get(keycloakId)
+                .update(userRepresentation);
+
+            log.info("[Keycloak] 사용자 비활성화 완료 - keycloakId: {}", keycloakId);
+
+        } catch (Exception e) {
+            // Admin Client 예외는 도메인 예외로 변환하여 상위 계층에 전파
+            log.error("[Keycloak] 사용자 비활성화 실패 - keycloakId: {}", keycloakId, e);
+            throw new UserException(UserErrorCode.KEYCLOAK_USER_DISABLE_FAILED);
+        }
+    }
+
+    /**
+     * Keycloak 사용자 Realm Role 변경
+     */
+    @Override
+    public void changeUserRole(String keycloakId, String oldRoleName, String newRoleName) {
+        try {
+            // 1. 제거할 기존 역할 조회 (RoleRepresentation 객체가 있어야 remove() 호출 가능)
+            RoleRepresentation oldRole = keycloakAdminClient
+                .realm(keycloakProperties.realm())
+                .roles()
+                .get(oldRoleName)
+                .toRepresentation();
+
+            // 2. 사용자의 기존 역할 제거
+            keycloakAdminClient
+                .realm(keycloakProperties.realm())
+                .users()
+                .get(keycloakId)
+                .roles()
+                .realmLevel()
+                .remove(List.of(oldRole));
+
+            log.info("[Keycloak] 기존 역할 제거 완료 - keycloakId: {}, role: {}", keycloakId, oldRoleName);
+
+        } catch (Exception e) {
+            // 기존 역할 제거 실패 -> 새 역할 부여 단계로 진입하지 않음
+            log.error("[Keycloak] 기존 역할 제거 실패 - keycloakId: {}, role: {}", keycloakId, oldRoleName, e);
+            throw new UserException(UserErrorCode.ROLE_ASSIGN_FAILED);
+        }
+
+        // 3. 새 역할 부여 (기존 private 메서드 assignRealmRole() 재사용)
+        //    내부에서 실패 시 ROLE_ASSIGN_FAILED 예외를 던짐
+        assignRealmRole(keycloakId, newRoleName);
+
+        log.info("[Keycloak] 역할 변경 완료 - keycloakId: {}, {} → {}", keycloakId, oldRoleName, newRoleName);
+    }
+
+
 }

@@ -12,8 +12,16 @@ import com.firstticket.userservice.application.dto.result.TokenResult;
  */
 public interface KeycloakAuthService {
 
-    // Keycloak Realm에 사용자를 생성하고 발급된 keycloakId(sub UUID)를 반환
-    String createUser(String email, String plainPassword, String username);
+    /**
+     * Keycloak Realm에 사용자를 생성하고 keycloakId(sub UUID)를 반환
+     *
+     * @param email        사용자 이메일 (Keycloak username으로도 사용)
+     * @param plainPassword 평문 비밀번호 (Keycloak이 해싱 담당)
+     * @param roleName     할당할 Realm Role 이름 (예: "CUSTOMER", "HOST", "ADMIN")
+     *                     기존 username 파라미터는 Keycloak 생성 시 실제로 사용되지 않아
+     *                     의미 있는 roleName으로 교체
+     */
+    String createUser(String email, String plainPassword, String roleName);
 
     /**
      * Keycloak Token Endpoint로 email/password 자격증명을 전달하여
@@ -32,4 +40,25 @@ public interface KeycloakAuthService {
      * - 서명 검은은 이후 keycloak refreshToken() 호출 시 keycloak이 담당
      */
     String extractSubject(String jwtToken);
+
+    /**
+     * Keycloak 사용자 계정을 비활성화합니다. (탈퇴 처리 연동)
+     * 탈퇴 처리시 DB와 같이 수행되어야 합니다 (동일 트랜잭션)
+     *
+     * 설계 결정 사항
+     * - DB softDelete와 동일한 트랜잭션 내에서 호출됩니다.
+     * - 실패 시 예외를 던져 트랜잭션을 롤백시키고 DB-Keycloak 정합성을 유지합니다.
+     */
+    void disableUser(String keycloakId);
+
+    /**
+     * Keycloak 사용자의 Realm Role을 변경합니다.
+     * DB와 같이 수행되어야 합니다 (동일 트랜잭션)
+     *
+     * 설계 결정 사항
+     * - Keycloak은 역할교체 API가 내부적으로 없으므로, 기존 역할 제거 -> 새 역할 부여 순서로 처리합니다.
+     * - 기존 역할 제거 실패 시 예외를 던집니다. (새 역할 부여 단계로 진입하지 않음)
+     * - DB changeRole과 동일한 트랜잭션 내에서 호출되므로 실패 시 DB도 롤백됩니다.
+     */
+    void changeUserRole(String keycloakId, String oldRoleName, String newRoleName);
 }

@@ -1,5 +1,6 @@
 package com.firstticket.userservice.application;
 
+import java.util.List;
 import java.util.UUID;
 
 import com.firstticket.userservice.application.dto.command.LoginCommand;
@@ -11,6 +12,7 @@ import com.firstticket.userservice.domain.Email;
 import com.firstticket.userservice.domain.Password;
 import com.firstticket.userservice.domain.User;
 import com.firstticket.userservice.domain.UserRepository;
+import com.firstticket.userservice.domain.UserRole;
 import com.firstticket.userservice.domain.UserStatus;
 import com.firstticket.userservice.domain.exception.UserErrorCode;
 import com.firstticket.userservice.domain.exception.UserException;
@@ -60,12 +62,11 @@ public class UserCommandService {
             throw new UserException(UserErrorCode.DUPLICATE_EMAIL);
         }
 
-        // 3. Keycloak Admin Client를 통해 Realm에 사용자 생성 (비밀번호 해시 처리 위임)
-        // keycloakId = Keycloak이 발급한 사용자 UUID (JWT sub claim과 동일)
+        // "CUSTOMER"를 명시적으로 전달 — roleName이 필요한 이유를 코드에서 드러냄
         String keycloakId = keycloakAuthService.createUser(
             email.value(),
             password.value(),
-            command.username()
+            "CUSTOMER"  // 일반 회원가입은 항상 CUSTOMER로 시작
         );
 
         // 4. User 엔티티 생성 (role: CUSTOMER 고정, status: ACTIVE 고정)
@@ -78,6 +79,80 @@ public class UserCommandService {
         User savedUser = userRepository.save(user);
         return UserResult.from(savedUser);
     }
+
+    // ==================================== 테스트 계정 관련  =====================================
+    // TO-DO : MVP 개발 이후 고도화 기간에 수정 예정
+
+    /**
+     * 로컬 개발 환경 전용 테스트 계정 시드 메서드
+     * @Profile("local")에서만 호출됩니다.
+     *
+     * 설계 결정 사항
+     * - CUSTOMER 이외의 role은 User.changeRole()로 변경
+     *   (Keycloak createUser()가 이미 올바른 role을 할당하므로 DB 정합성을 맞추는 용도)
+     */
+    @Transactional
+    public List<UserResult> seedTestUsers() {
+        // 생성할 테스트 계정 명세
+        List<SeedUserSpec> specs = List.of(
+            new SeedUserSpec("customer@first-ticket.com", "Customer1234!", "테스트고객", UserRole.CUSTOMER),
+            new SeedUserSpec("host@first-ticket.com",     "Host1234!",     "테스트호스트", UserRole.HOST),
+            new SeedUserSpec("admin@first-ticket.com",    "Admin1234!",    "관리자",      UserRole.ADMIN)
+        );
+
+        return specs.stream()
+            .map(this::createOrGetSeedUser)
+            .toList();
+    }
+
+    /**
+     * 단일 테스트 계정 생성 또는 기존 계정 반환
+     * - DB에 이미 존재하면 Keycloak 호출 없이 기존 계정 반환
+     * - 없으면 Keycloak 생성 → DB INSERT
+     */
+    private UserResult createOrGetSeedUser(SeedUserSpec spec) {
+        // 이미 DB에 존재하면 기존 계정 반환 (멱등성)
+        return userRepository.findByEmail(spec.email())
+            .map(existing -> {
+                log.info("[seed] 이미 존재하는 계정 건너뜀 - email: {}, role: {}", spec.email(), spec.role());
+                return UserResult.from(existing);
+            })
+            .orElseGet(() -> {
+                String keycloakId = keycloakAuthService.createUser(
+                    spec.email(),
+                    spec.password(),
+                    spec.role().name()
+                );
+
+                // User 엔티티 생성 — 기본 role은 CUSTOMER
+                Email email = Email.of(spec.email());
+                User user = User.create(keycloakId, email, spec.username());
+
+                // CUSTOMER 이외의 역할은 changeRole()로 DB role 동기화
+                if (spec.role() != UserRole.CUSTOMER) {
+                    user.changeRole(spec.role());
+                }
+
+                user.initCreatedBy(UUID.fromString(keycloakId));
+
+                User saved = userRepository.save(user);
+                log.info("[seed] 테스트 계정 생성 완료 - email: {}, role: {}", spec.email(), spec.role());
+                return UserResult.from(saved);
+            });
+    }
+
+    /**
+     * 테스트 계정 생성 명세 내부 DTO
+     * seedTestUsers()와 createOrGetSeedUser()에서만 사용하므로 private으로 제한
+     */
+    private record SeedUserSpec(
+        String email,
+        String password,
+        String username,
+        UserRole role
+    ) {}
+
+    // ==================================== 테스트 계정 관련 끝 =====================================
 
     /**
      * 로그인
@@ -194,5 +269,63 @@ public class UserCommandService {
         }
 
         return newTokens;
+    }
+
+    // ADMIN 기능 - 사용자 Soft Delete (탈퇴 처리)
+    @Transactional
+    public void deleteUser(UUID adminId, UUID targetUserId) {
+        // 1. PK로 사용자 조회
+        User user = userRepository.findById(targetUserId)
+            .orElseThrow(() -> {
+                log.warn("[deleteUser] 존재하지 않는 사용자 - targetUserId: {}", targetUserId);
+                return new UserException(UserErrorCode.USER_NOT_FOUND);
+            });
+
+        // 2. 이미 DELETED 상태인지 확인
+        if (user.getStatus() == UserStatus.DELETED) {
+            log.warn("[deleteUser] 이미 탈퇴된 사용자 재삭제 시도 - targetUserId: {}", targetUserId);
+            throw new UserException(UserErrorCode.USER_ALREADY_DELETED);
+        }
+
+        // 3. DB Soft Delete: status=DELETED + deletedAt/deletedBy 기록
+        // 트랜잭션 내이므로 아직 커밋되지 않은 상태
+        user.softDelete(adminId);
+
+        // 4. Keycloak 계정 비활성화
+        // 실패 시 UserException 발생 → 트랜잭션 롤백 → DB softDelete도 취소
+        keycloakAuthService.disableUser(user.getKeycloakId());
+
+        log.info("[deleteUser] 사용자 탈퇴 처리 완료 - targetUserId: {}, adminId: {}", targetUserId, adminId);
+    }
+
+    // ADMIN 기능 - 사용자 역할 변경
+    @Transactional
+    public UserResult changeRole(UUID targetUserId, UserRole newRole) {
+        // 1. PK로 사용자 조회
+        User user = userRepository.findById(targetUserId)
+            .orElseThrow(() -> {
+                log.warn("[changeRole] 존재하지 않는 사용자 - targetUserId: {}", targetUserId);
+                return new UserException(UserErrorCode.USER_NOT_FOUND);
+            });
+
+        // 2. 탈퇴 상태 사용자는 역할 변경 불가
+        if (user.getStatus() == UserStatus.DELETED) {
+            log.warn("[changeRole] 탈퇴된 사용자 역할 변경 시도 - targetUserId: {}", targetUserId);
+            throw new UserException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. Keycloak role 변경 시 '기존 역할'이 필요하므로 changeRole() 호출 전에 캡처
+        UserRole oldRole = user.getRole();
+
+        // 4. DB role 변경 (트랜잭션 내, 아직 커밋 X)
+        user.changeRole(newRole);
+
+        // 5. Keycloak role 변경: 기존 역할 제거 → 새 역할 부여
+        // 실패 시 UserException 발생 → 트랜잭션 롤백 → DB changeRole도 취소
+        keycloakAuthService.changeUserRole(user.getKeycloakId(), oldRole.name(), newRole.name());
+
+        log.info("[changeRole] 역할 변경 완료 - targetUserId: {}, {} → {}", targetUserId, oldRole, newRole);
+
+        return UserResult.from(user);
     }
 }

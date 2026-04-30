@@ -1,6 +1,8 @@
 package com.firstticket.userservice.domain;
 
 import com.firstticket.common.persistence.BaseUserEntity;
+import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -134,6 +136,9 @@ public class User extends BaseUserEntity {
      * 관리자가 직접 역할을 조정할 때 사용합니다.
      */
     public void changeRole(UserRole newRole) {
+        if (this.status == UserStatus.DELETED) {
+            throw new UserException(UserErrorCode.USER_NOT_FOUND);
+        }
         this.role = newRole;
     }
 

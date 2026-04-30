@@ -58,7 +58,7 @@ public class UserQueryService {
     public UserSummaryData getUserById(UUID userId) {
         return userQueryRepository.findSummaryById(userId)
             .orElseThrow(() -> {
-                log.warn("[getUserById] 존재하지 않는 사용자 - userId: {}", userId);
+                log.warn("[getUserById] 존재하지 않는 사용자 - userId: {}", mask(userId));
                 return new UserException(UserErrorCode.USER_NOT_FOUND);
             });
     }

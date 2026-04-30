@@ -355,15 +355,18 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
      */
     @Override
     public void changeUserRole(String keycloakId, String oldRoleName, String newRoleName) {
+        // 보상 처리(롤백)에 재사용하기 위해 try 블록 바깥에 선언
+        RoleRepresentation oldRole;
+
         try {
-            // 1. 제거할 기존 역할 조회 (RoleRepresentation 객체가 있어야 remove() 호출 가능)
-            RoleRepresentation oldRole = keycloakAdminClient
+            // 1. 제거할 기존 역할 조회
+            oldRole = keycloakAdminClient
                 .realm(keycloakProperties.realm())
                 .roles()
                 .get(oldRoleName)
                 .toRepresentation();
 
-            // 2. 사용자의 기존 역할 제거
+            // 2. 기존 역할 제거
             keycloakAdminClient
                 .realm(keycloakProperties.realm())
                 .users()
@@ -375,17 +378,36 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
             log.info("[Keycloak] 기존 역할 제거 완료 - keycloakId: {}, role: {}", keycloakId, oldRoleName);
 
         } catch (Exception e) {
-            // 기존 역할 제거 실패 -> 새 역할 부여 단계로 진입하지 않음
             log.error("[Keycloak] 기존 역할 제거 실패 - keycloakId: {}, role: {}", keycloakId, oldRoleName, e);
             throw new UserException(UserErrorCode.ROLE_ASSIGN_FAILED);
         }
 
-        // 3. 새 역할 부여 (기존 private 메서드 assignRealmRole() 재사용)
-        //    내부에서 실패 시 ROLE_ASSIGN_FAILED 예외를 던짐
-        assignRealmRole(keycloakId, newRoleName);
+        try {
+            // 3. 새 역할 부여
+            assignRealmRole(keycloakId, newRoleName);
+
+        } catch (UserException roleAssignException) {
+            // 새 역할 부여 실패 → 기존 역할 복구 (보상 처리)
+            // DB는 트랜잭션 롤백으로 복구되지만 Keycloak은 수동 복구 필요
+            try {
+                keycloakAdminClient
+                    .realm(keycloakProperties.realm())
+                    .users()
+                    .get(keycloakId)
+                    .roles()
+                    .realmLevel()
+                    .add(List.of(oldRole)); // 제거 단계에서 조회한 oldRole 재사용
+                log.warn("[Keycloak] 역할 복구 완료 - keycloakId: {}, role: {}", keycloakId, oldRoleName);
+
+            } catch (Exception rollbackException) {
+                // 복구 과정 실패 -> Keycloak에 역할 없는 상태 -> 수동 정리 필요
+                log.error("[Keycloak] 역할 복구 실패 - 수동 정리 필요 keycloakId: {}, role: {}", keycloakId, oldRoleName, rollbackException);
+                roleAssignException.addSuppressed(rollbackException);
+            }
+            throw roleAssignException;
+        }
 
         log.info("[Keycloak] 역할 변경 완료 - keycloakId: {}, {} → {}", keycloakId, oldRoleName, newRoleName);
     }
-
 
 }

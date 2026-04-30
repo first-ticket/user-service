@@ -301,31 +301,24 @@ public class UserCommandService {
     // ADMIN 기능 - 사용자 역할 변경
     @Transactional
     public UserResult changeRole(UUID targetUserId, UserRole newRole) {
-        // 1. PK로 사용자 조회
+        // 1. PK로 사용자 조회 - 탈퇴 사용자 여부 검증은 User 도메인 엔티티에서 수행
         User user = userRepository.findById(targetUserId)
             .orElseThrow(() -> {
                 log.warn("[changeRole] 존재하지 않는 사용자 - targetUserId: {}", targetUserId);
                 return new UserException(UserErrorCode.USER_NOT_FOUND);
             });
 
-        // 2. 탈퇴 상태 사용자는 역할 변경 불가
-        if (user.getStatus() == UserStatus.DELETED) {
-            log.warn("[changeRole] 탈퇴된 사용자 역할 변경 시도 - targetUserId: {}", targetUserId);
-            throw new UserException(UserErrorCode.USER_NOT_FOUND);
-        }
-
-        // 3. Keycloak role 변경 시 '기존 역할'이 필요하므로 changeRole() 호출 전에 캡처
+        // 2. Keycloak role 변경 시 '기존 역할'이 필요하므로 changeRole() 호출 전에 캡처
         UserRole oldRole = user.getRole();
 
-        // 4. DB role 변경 (트랜잭션 내, 아직 커밋 X)
+        // 3. DB role 변경 (트랜잭션 내, 아직 커밋 X)
         user.changeRole(newRole);
 
-        // 5. Keycloak role 변경: 기존 역할 제거 → 새 역할 부여
+        // 4. Keycloak role 변경: 기존 역할 제거 → 새 역할 부여
         // 실패 시 UserException 발생 → 트랜잭션 롤백 → DB changeRole도 취소
         keycloakAuthService.changeUserRole(user.getKeycloakId(), oldRole.name(), newRole.name());
 
         log.info("[changeRole] 역할 변경 완료 - targetUserId: {}, {} → {}", targetUserId, oldRole, newRole);
-
         return UserResult.from(user);
     }
 }

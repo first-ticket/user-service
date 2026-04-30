@@ -120,8 +120,8 @@ public class AdminController {
         @PathVariable UUID userId
     ) {
         // getUserId()는 삭제를 수행한 관리자 UUID → deletedBy 기록에 사용
-        UUID adminId = AuthContext.getUserId();
         AuthContext.requireRole(UserRole.ADMIN);
+        UUID adminId = AuthContext.getUserId();
 
         userCommandService.deleteUser(adminId, userId);
 

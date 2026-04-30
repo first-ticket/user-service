@@ -29,7 +29,8 @@ public enum UserErrorCode implements ErrorCode {
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."),
 
     // Keycloak
-    ROLE_ASSIGN_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "사용자 권한 설정에 실패했습니다.");
+    ROLE_ASSIGN_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "keycloak 사용자 권한 설정에 실패했습니다."),
+    KEYCLOAK_USER_DISABLE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "Keycloak 사용자 비활성화에 실패했습니다.");
 
     private final HttpStatus status;
     private final String message;

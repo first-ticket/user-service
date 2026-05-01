@@ -1,0 +1,461 @@
+package com.firstticket.userservice.application;
+
+import com.firstticket.userservice.application.dto.command.LoginCommand;
+import com.firstticket.userservice.application.dto.command.RefreshTokenCommand;
+import com.firstticket.userservice.application.dto.command.SignupCommand;
+import com.firstticket.userservice.application.dto.command.UpdateProfileCommand;
+import com.firstticket.userservice.application.dto.result.TokenResult;
+import com.firstticket.userservice.application.dto.result.UserResult;
+import com.firstticket.userservice.domain.Email;
+import com.firstticket.userservice.domain.User;
+import com.firstticket.userservice.domain.UserRole;
+import com.firstticket.userservice.domain.UserRepository;
+import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
+import com.firstticket.userservice.domain.service.KeycloakAuthService;
+import com.firstticket.userservice.domain.service.RefreshTokenStore;
+import com.firstticket.userservice.domain.service.RefreshTokenStore.RotateResult;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * UserCommandService 단위 테스트
+ *
+ * Keycloak, Redis, JPA Repository를 모두 Mock 처리
+ * 유즈케이스 흐름과 예외 전파 규칙만 검증
+ *
+ * VO 유효성 검증(Email, Password)은 Domain 계층 테스트에서 이미 검증하므로
+ * 본 테스트에서는 유효한 값을 픽스처로 사용
+ */
+@ExtendWith(MockitoExtension.class)
+class UserCommandServiceTest {
+
+    @InjectMocks
+    private UserCommandService userCommandService;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private KeycloakAuthService keycloakAuthService;
+
+    @Mock
+    private RefreshTokenStore refreshTokenStore;
+
+    // keycloakId는 Keycloak이 발급하는 UUID 문자열
+    private final String KEYCLOAK_ID = UUID.randomUUID().toString();
+
+    // 테스트 전용 ACTIVE User 픽스처
+    private User activeUser() {
+        return User.create(KEYCLOAK_ID, Email.of("test@example.com"), "testUser");
+    }
+
+    // ======== signup ========
+
+    @Nested
+    @DisplayName("회원가입(signup)")
+    class Signup {
+
+        @Test
+        @DisplayName("정상 회원가입 시 UserResult를 반환하고 Keycloak 계정을 생성한다")
+        void 정상_회원가입() {
+            // given
+            SignupCommand command = new SignupCommand("new@example.com", "password1!", "신규유저");
+
+            when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+            when(keycloakAuthService.createUser(anyString(), anyString(), anyString()))
+                .thenReturn(KEYCLOAK_ID); // Keycloak이 발급한 keycloakId 반환
+            // save() 호출 시 전달받은 User 그대로 반환 (JPA ID 생성 없이 흐름 검증)
+            when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+            // when
+            UserResult result = userCommandService.signup(command);
+
+            // then — Result 필드 검증
+            assertThat(result.email()).isEqualTo("new@example.com");
+            assertThat(result.role()).isEqualTo(UserRole.CUSTOMER);  // 신규 가입은 항상 CUSTOMER
+
+            // Keycloak 계정 생성이 정확히 1회 호출되었는지 검증
+            verify(keycloakAuthService).createUser("new@example.com", "password1!", "CUSTOMER");
+            verify(userRepository).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("이미 사용 중인 이메일로 가입 시 DUPLICATE_EMAIL 예외가 발생하며 Keycloak은 호출되지 않는다")
+        void 중복_이메일_예외() {
+            // given
+            SignupCommand command = new SignupCommand("dup@example.com", "password1!", "중복유저");
+            when(userRepository.existsByEmail("dup@example.com")).thenReturn(true);
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.signup(command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.DUPLICATE_EMAIL);
+
+            // DB 중복 확인 이후에 Keycloak 호출이 일어나서는 안 됨 (불필요한 외부 호출 방지)
+            verify(keycloakAuthService, never()).createUser(anyString(), anyString(), anyString());
+        }
+    }
+
+    // ======== login ========
+
+    @Nested
+    @DisplayName("로그인(login)")
+    class Login {
+
+        @Test
+        @DisplayName("정상 로그인 시 TokenResult를 반환하고 Redis에 Refresh Token을 저장한다")
+        void 정상_로그인() {
+            // given
+            LoginCommand command = new LoginCommand("test@example.com", "password1!");
+            User user = activeUser();
+            TokenResult tokenResult = new TokenResult("access-token", "refresh-token");
+
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            when(keycloakAuthService.login(anyString(), anyString())).thenReturn(tokenResult);
+
+            // when
+            TokenResult result = userCommandService.login(command);
+
+            // then
+            assertThat(result.accessToken()).isEqualTo("access-token");
+            assertThat(result.refreshToken()).isEqualTo("refresh-token");
+
+            // Refresh Token을 Redis에 저장했는지 검증
+            verify(refreshTokenStore).save(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("등록되지 않은 이메일로 로그인 시 INVALID_CREDENTIALS 예외가 발생한다")
+        void 사용자_없음_예외() {
+            // given
+            LoginCommand command = new LoginCommand("nobody@example.com", "password1!");
+            when(userRepository.findByEmail("nobody@example.com")).thenReturn(Optional.empty());
+
+            // when & then - 계정 존재 여부를 노출하지 않기 위해 INVALID_CREDENTIALS 단일 에러 반환
+            assertThatThrownBy(() -> userCommandService.login(command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.INVALID_CREDENTIALS);
+        }
+
+        @Test
+        @DisplayName("LOCKED 계정으로 로그인 시 INVALID_CREDENTIALS 예외가 발생한다")
+        void LOCKED_계정_예외() {
+            // given — LOCKED 상태 User 생성
+            User lockedUser = activeUser();
+            lockedUser.lock();
+
+            LoginCommand command = new LoginCommand("test@example.com", "password1!");
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(lockedUser));
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.login(command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.INVALID_CREDENTIALS);
+        }
+
+        @Test
+        @DisplayName("DELETED 계정으로 로그인 시 INVALID_CREDENTIALS 예외가 발생한다")
+        void DELETED_계정_예외() {
+            // given — DELETED 상태 User 생성
+            User deletedUser = activeUser();
+            deletedUser.softDelete(UUID.randomUUID());
+
+            LoginCommand command = new LoginCommand("test@example.com", "password1!");
+            when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(deletedUser));
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.login(command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.INVALID_CREDENTIALS);
+        }
+    }
+
+    // ======== logout ========
+
+    @Nested
+    @DisplayName("로그아웃(logout)")
+    class Logout {
+
+        @Test
+        @DisplayName("정상 로그아웃 시 Redis Refresh Token이 삭제된다")
+        void 정상_로그아웃() {
+            // given
+            User user = activeUser();
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+
+            // when
+            userCommandService.logout(KEYCLOAK_ID);
+
+            // then - Redis 토큰 삭제 1회 호출 검증
+            verify(refreshTokenStore).delete(any());
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 사용자 로그아웃 시 USER_NOT_FOUND 예외가 발생한다")
+        void 사용자_없음_예외() {
+            // given
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.logout(KEYCLOAK_ID))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_NOT_FOUND);
+        }
+    }
+
+    // ======== refreshToken ========
+
+    @Nested
+    @DisplayName("토큰 재발급(refreshToken)")
+    class RefreshToken {
+
+        @Test
+        @DisplayName("정상 재발급 시 새 TokenResult를 반환한다")
+        void 정상_재발급() {
+            // given
+            String oldRefreshToken = "old-refresh-token";
+            String newRefreshToken = "new-refresh-token";
+            RefreshTokenCommand command = new RefreshTokenCommand(oldRefreshToken);
+            User user = activeUser();
+            TokenResult newTokens = new TokenResult("new-access-token", newRefreshToken);
+
+            when(keycloakAuthService.extractSubject(oldRefreshToken)).thenReturn(KEYCLOAK_ID);
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+            when(keycloakAuthService.refreshToken(oldRefreshToken)).thenReturn(newTokens);
+            // Lua CAS rotate 성공 시나리오
+            when(refreshTokenStore.rotate(any(), anyString(), anyString())).thenReturn(RotateResult.SUCCESS);
+
+            // when
+            TokenResult result = userCommandService.refreshToken(command);
+
+            // then
+            assertThat(result.accessToken()).isEqualTo("new-access-token");
+            assertThat(result.refreshToken()).isEqualTo(newRefreshToken);
+        }
+
+        @Test
+        @DisplayName("Redis에 토큰이 없으면(NOT_FOUND) INVALID_REFRESH_TOKEN 예외가 발생한다")
+        void 토큰_없음_예외() {
+            // given — 로그아웃 후 또는 TTL 만료 후 재발급 시도
+            RefreshTokenCommand command = new RefreshTokenCommand("expired-token");
+            User user = activeUser();
+
+            when(keycloakAuthService.extractSubject(anyString())).thenReturn(KEYCLOAK_ID);
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+            when(keycloakAuthService.refreshToken(anyString()))
+                .thenReturn(new TokenResult("a", "b"));
+            when(refreshTokenStore.rotate(any(), anyString(), anyString())).thenReturn(RotateResult.NOT_FOUND);
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.refreshToken(command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.INVALID_REFRESH_TOKEN);
+        }
+
+        @Test
+        @DisplayName("토큰 불일치(TOKEN_MISMATCH) 시 INVALID_REFRESH_TOKEN 예외가 발생한다 - 재사용 공격 방어")
+        void 토큰_불일치_예외() {
+            // given - 이미 rotate된 구 토큰 사용 시도
+            RefreshTokenCommand command = new RefreshTokenCommand("stale-token");
+            User user = activeUser();
+
+            when(keycloakAuthService.extractSubject(anyString())).thenReturn(KEYCLOAK_ID);
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+            when(keycloakAuthService.refreshToken(anyString()))
+                .thenReturn(new TokenResult("a", "b"));
+            when(refreshTokenStore.rotate(any(), anyString(), anyString())).thenReturn(RotateResult.TOKEN_MISMATCH);
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.refreshToken(command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.INVALID_REFRESH_TOKEN);
+        }
+    }
+
+    // ======== deleteUser (ADMIN) ========
+
+    @Nested
+    @DisplayName("사용자 삭제(deleteUser) - ADMIN")
+    class DeleteUser {
+
+        @Test
+        @DisplayName("정상 삭제 시 Soft Delete 처리 후 Keycloak 비활성화를 호출한다")
+        void 정상_삭제() {
+            // given
+            UUID adminId = UUID.randomUUID();
+            UUID targetId = UUID.randomUUID();
+            User user = activeUser();
+
+            when(userRepository.findById(targetId)).thenReturn(Optional.of(user));
+
+            // when
+            userCommandService.deleteUser(adminId, targetId);
+
+            // then — Keycloak 비활성화 1회 호출 검증
+            verify(keycloakAuthService).disableUser(KEYCLOAK_ID);
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 사용자 삭제 시 USER_NOT_FOUND 예외가 발생한다")
+        void 사용자_없음_예외() {
+            // given
+            when(userRepository.findById(any())).thenReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.deleteUser(UUID.randomUUID(), UUID.randomUUID()))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("이미 탈퇴한 사용자 재삭제 시 USER_ALREADY_DELETED 예외가 발생한다")
+        void 이미_삭제된_사용자_예외() {
+            // given - 이미 DELETED 상태인 User
+            User deletedUser = activeUser();
+            deletedUser.softDelete(UUID.randomUUID());
+
+            when(userRepository.findById(any())).thenReturn(Optional.of(deletedUser));
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.deleteUser(UUID.randomUUID(), UUID.randomUUID()))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_ALREADY_DELETED);
+        }
+    }
+
+    // ======== changeRole (ADMIN) ========
+
+    @Nested
+    @DisplayName("역할 변경(changeRole) — ADMIN")
+    class ChangeRole {
+
+        @Test
+        @DisplayName("정상 역할 변경 시 DB와 Keycloak 모두 업데이트된다")
+        void 정상_역할_변경() {
+            // given
+            UUID targetId = UUID.randomUUID();
+            User user = activeUser(); // role: CUSTOMER
+
+            when(userRepository.findById(targetId)).thenReturn(Optional.of(user));
+
+            // when
+            UserResult result = userCommandService.changeRole(targetId, UserRole.HOST);
+
+            // then
+            assertThat(result.role()).isEqualTo(UserRole.HOST);
+            // 기존 역할(CUSTOMER) 제거 → 새 역할(HOST) 부여 순서로 Keycloak 동기화
+            verify(keycloakAuthService).changeUserRole(KEYCLOAK_ID, "CUSTOMER", "HOST");
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 사용자 역할 변경 시 USER_NOT_FOUND 예외가 발생한다")
+        void 사용자_없음_예외() {
+            // given
+            when(userRepository.findById(any())).thenReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.changeRole(UUID.randomUUID(), UserRole.HOST))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_NOT_FOUND);
+        }
+    }
+
+    // ======== updateProfile ========
+
+    @Nested
+    @DisplayName("내 정보 수정(updateProfile)")
+    class UpdateProfile {
+
+        @Test
+        @DisplayName("정상 수정 시 변경된 username으로 UserResult를 반환한다")
+        void 정상_수정() {
+            // given
+            User user = activeUser();
+            UpdateProfileCommand command = new UpdateProfileCommand("변경된닉네임");
+
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+
+            // when
+            UserResult result = userCommandService.updateProfile(KEYCLOAK_ID, command);
+
+            // then
+            assertThat(result.username()).isEqualTo("변경된닉네임");
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 사용자 수정 시 USER_NOT_FOUND 예외가 발생한다")
+        void 사용자_없음_예외() {
+            // given
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() ->
+                userCommandService.updateProfile(KEYCLOAK_ID, new UpdateProfileCommand("닉네임")))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_NOT_FOUND);
+        }
+    }
+
+    // ======== withdraw ========
+
+    @Nested
+    @DisplayName("회원 탈퇴(withdraw)")
+    class Withdraw {
+
+        @Test
+        @DisplayName("정상 탈퇴 시 Soft Delete, Keycloak 비활성화, Redis 토큰 삭제가 모두 호출된다")
+        void 정상_탈퇴() {
+            // given
+            User user = activeUser();
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+
+            // when
+            userCommandService.withdraw(KEYCLOAK_ID);
+
+            // then - 3단계 처리 모두 호출 검증
+            verify(keycloakAuthService).disableUser(KEYCLOAK_ID); // Keycloak 비활성화
+            verify(refreshTokenStore).delete(any());               // Redis 토큰 삭제
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 사용자 탈퇴 시 USER_NOT_FOUND 예외가 발생한다")
+        void 사용자_없음_예외() {
+            // given
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.withdraw(KEYCLOAK_ID))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_NOT_FOUND);
+        }
+    }
+}

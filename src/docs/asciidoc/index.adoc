@@ -97,6 +97,8 @@ include::{snippets}/auth-login-unauthorized/response-fields.adoc[]
 
 `POST /api/v1/auth/logout`
 
+NOTE: 로그아웃 성공 시 `204 No Content`로 응답 본문이 없습니다. (`ApiResponse<T>` 미사용)
+
 operation::auth-logout[snippets='http-request,request-headers,http-response']
 
 === 토큰 재발급
@@ -148,7 +150,7 @@ operation::user-withdraw[snippets='http-request,request-headers,http-response,re
 
 === HOST 신청
 
-`POST /api/v1/users/me/host-request`
+`POST /api/v1/users/me/host-requests`
 
 operation::user-host-request[snippets='http-request,request-headers,http-response,response-fields']
 

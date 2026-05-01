@@ -58,6 +58,16 @@ class PasswordTest {
         }
 
         @Test
+        @DisplayName("공백만 있는 입력 시 INVALID_PASSWORD_FORMAT 예외가 발생한다")
+        void 공백_입력_예외() {
+            // isBlank()는 공백-only 문자열도 true → 빈 문자열과 동일한 예외 경로
+            assertThatThrownBy(() -> Password.of("   "))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.INVALID_PASSWORD_FORMAT);
+        }
+
+        @Test
         @DisplayName("7자 미만 비밀번호는 INVALID_PASSWORD_FORMAT 예외가 발생한다")
         void 최소_길이_미만_예외() {
             assertThatThrownBy(() -> Password.of("1234567")) // MIN_LENGTH - 1

@@ -343,14 +343,8 @@ public class UserCommandService {
                 return new UserException(UserErrorCode.USER_NOT_FOUND);
             });
 
-        // 2. DELETED 사용자 차단
-        if (user.getStatus() == UserStatus.DELETED) {
-            log.warn("[updateProfile] 탈퇴 사용자의 정보 수정 시도 - userId: {}", mask(user.getId()));
-            throw new UserException(UserErrorCode.USER_ALREADY_DELETED);
-        }
-
-        // 3. username 수정
-        user.changeUsername(command.username());
+        // 2. 유효성 체크 후 수정 (엔티티 비즈니스 메서드로 이관)
+        user.updateProfile(command.username());
 
         log.info("[updateProfile] 정보 수정 완료 - userId: {}", mask(user.getId()));
         return UserResult.from(user);
@@ -365,7 +359,7 @@ public class UserCommandService {
      * 4. Redis Refresh Token 즉시 삭제 (현재 세션 무효화)
      *
      */
-    //TODO:DB 커밋 성공 후 Keycloak 호출 실패 시 불일치 발생 가능 -> MVP 구현 후추후 Outbox 패턴 적용 예정
+    //TODO:DB 커밋 성공 후 Keycloak 호출 실패 시 불일치 발생 가능 -> MVP 구현 후 @TransactionalEventListener(AFTER_COMMIT) 또는 Outbox 패턴 적용 예정
     @Transactional
     public void withdraw(String keycloakId) {
         Objects.requireNonNull(keycloakId, "keycloakId는 null일 수 없습니다.");

@@ -27,7 +27,11 @@ public enum UserSuccessCode implements SuccessCode {
     //HOST Request
     HOST_REQUEST_CREATED(HttpStatus.CREATED, "HOST 신청이 완료되었습니다."),     // 201
     HOST_REQUEST_LIST_FOUND(HttpStatus.OK, "HOST 신청 목록을 조회했습니다."),     // 200
-    HOST_REQUEST_PROCESSED(HttpStatus.OK, "HOST 신청이 처리되었습니다.");         // 200
+    HOST_REQUEST_PROCESSED(HttpStatus.OK, "HOST 신청이 처리되었습니다."),         // 200
+
+    // 내 정보 수정 / 회원탈퇴
+    PROFILE_UPDATED(HttpStatus.OK, "회원 정보가 수정되었습니다."),       // 200
+    WITHDRAW_SUCCESS(HttpStatus.OK, "회원 탈퇴가 완료되었습니다.");      // 200
 
     private final HttpStatus status;
     private final String message;

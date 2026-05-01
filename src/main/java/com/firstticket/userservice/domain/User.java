@@ -162,4 +162,17 @@ public class User extends BaseUserEntity {
         }
         this.createdBy = id;
     }
+
+    /**
+     * 사용자 정보 수정
+     *
+     * - DELETED 상태의 사용자는 수정 불가
+     * - 향후 수정 가능 필드가 늘어나면 UpdateProfileCommand 형태로 파라미터 확장 가능
+     */
+    public void updateProfile(String newUsername) {
+        if (this.status == UserStatus.DELETED) {
+            throw new UserException(UserErrorCode.USER_ALREADY_DELETED);
+        }
+        this.username = newUsername;
+    }
 }

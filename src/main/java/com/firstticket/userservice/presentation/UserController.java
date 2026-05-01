@@ -3,20 +3,27 @@ package com.firstticket.userservice.presentation;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.firstticket.common.response.ApiResponse;
 import com.firstticket.common.web.AuthContext;
 import com.firstticket.userservice.application.HostRequestCommandService;
+import com.firstticket.userservice.application.UserCommandService;
 import com.firstticket.userservice.application.UserQueryService;
+import com.firstticket.userservice.application.dto.command.UpdateProfileCommand;
 import com.firstticket.userservice.application.dto.result.HostRequestResult;
 import com.firstticket.userservice.application.dto.result.UserResult;
+import com.firstticket.userservice.presentation.dto.request.UpdateProfileRequest;
 import com.firstticket.userservice.presentation.dto.response.HostRequestResponse;
 import com.firstticket.userservice.presentation.dto.response.UserResponse;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,6 +45,7 @@ import lombok.extern.slf4j.Slf4j;
 public class UserController {
 
     private final UserQueryService userQueryService;
+    private final UserCommandService userCommandService;
     private final HostRequestCommandService hostRequestCommandService;
 
     /**
@@ -55,16 +63,56 @@ public class UserController {
      *   404 Not Found    — 사용자가 존재하지 않거나 DELETED 상태
      */
     @GetMapping("/me")
-    public ResponseEntity<ApiResponse<UserResponse>> getMyInfo(
+    public ResponseEntity<ApiResponse<UserResponse>> getMyInfo() {
+        UUID keycloakId = AuthContext.getUserId();
+        UserResult result = userQueryService.getMyInfo(keycloakId);
+        return ApiResponse.success(UserSuccessCode.USER_FOUND, UserResponse.from(result));
+    }
+
+    /**
+     * 내 정보 수정
+     * PATCH /api/v1/users/me
+     * Body: { "username": "새이름" }
+     *
+     * @return 200 OK + UserResponse (수정된 사용자 정보)
+     *
+     * 오류 응답:
+     *   400 Bad Request  - username 누락 또는 50자 초과
+     *   401 Unauthorized - X-User-Id 헤더 누락
+     *   404 Not Found    - 사용자 없음
+     *   410 Gone         - 이미 탈퇴된 사용자
+     */
+    @PatchMapping("/me")
+    public ResponseEntity<ApiResponse<UserResponse>> updateProfile(
+        @RequestBody @Valid UpdateProfileRequest request
     ) {
-        UUID userId = AuthContext.getUserId();
-
-        UserResult result = userQueryService.getMyInfo(userId);
-
-        return ApiResponse.success(
-            UserSuccessCode.USER_FOUND,
-            UserResponse.from(result)
+        UUID keycloakId = AuthContext.getUserId();
+        UserResult result = userCommandService.updateProfile(
+            keycloakId.toString(),
+            new UpdateProfileCommand(request.username())
         );
+
+        return ApiResponse.success(UserSuccessCode.PROFILE_UPDATED, UserResponse.from(result));
+    }
+
+    /**
+     * 회원 탈퇴 (본인)
+     * DELETE /api/v1/users/me
+     *
+     * 처리 결과: DB Soft Delete + Keycloak 비활성화 + Redis 세션 즉시 무효화
+     *
+     * @return 200 OK (탈퇴 완료 메시지, data 없음)
+     *
+     * 오류 응답:
+     *   401 Unauthorized - X-User-Id 헤더 누락
+     *   404 Not Found    - 사용자 없음
+     *   410 Gone         - 이미 탈퇴된 사용자
+     */
+    @DeleteMapping("/me")
+    public ResponseEntity<ApiResponse<Void>> withdraw() {
+        UUID keycloakId = AuthContext.getUserId();
+        userCommandService.withdraw(keycloakId.toString());
+        return ApiResponse.success(UserSuccessCode.WITHDRAW_SUCCESS);
     }
 
     /**
@@ -83,9 +131,7 @@ public class UserController {
     @PostMapping("/me/host-requests")
     public ResponseEntity<ApiResponse<HostRequestResponse>> requestHost() {
         UUID keycloakId = AuthContext.getUserId();
-
         HostRequestResult result = hostRequestCommandService.request(keycloakId);
-
         return ApiResponse.success(
             UserSuccessCode.HOST_REQUEST_CREATED,
             HostRequestResponse.from(result)

@@ -1,11 +1,13 @@
 package com.firstticket.userservice.application;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 import com.firstticket.userservice.application.dto.command.LoginCommand;
 import com.firstticket.userservice.application.dto.command.RefreshTokenCommand;
 import com.firstticket.userservice.application.dto.command.SignupCommand;
+import com.firstticket.userservice.application.dto.command.UpdateProfileCommand;
 import com.firstticket.userservice.application.dto.result.TokenResult;
 import com.firstticket.userservice.application.dto.result.UserResult;
 import com.firstticket.userservice.domain.Email;
@@ -96,8 +98,8 @@ public class UserCommandService {
         // 생성할 테스트 계정 명세
         List<SeedUserSpec> specs = List.of(
             new SeedUserSpec("customer@first-ticket.com", "Customer1234!", "테스트고객", UserRole.CUSTOMER),
-            new SeedUserSpec("host@first-ticket.com",     "Host1234!",     "테스트호스트", UserRole.HOST),
-            new SeedUserSpec("admin@first-ticket.com",    "Admin1234!",    "관리자",      UserRole.ADMIN)
+            new SeedUserSpec("host@first-ticket.com", "Host1234!", "테스트호스트", UserRole.HOST),
+            new SeedUserSpec("admin@first-ticket.com", "Admin1234!", "관리자", UserRole.ADMIN)
         );
 
         return specs.stream()
@@ -150,7 +152,8 @@ public class UserCommandService {
         String password,
         String username,
         UserRole role
-    ) {}
+    ) {
+    }
 
     // ==================================== 테스트 계정 관련 끝 =====================================
 
@@ -320,5 +323,78 @@ public class UserCommandService {
 
         log.info("[changeRole] 역할 변경 완료 - targetUserId: {}, {} → {}", targetUserId, oldRole, newRole);
         return UserResult.from(user);
+    }
+
+    /**
+     * 내 정보 수정 (본인)
+     * 처리 흐름
+     * 1. keycloakId로 사용자 조회
+     * 2. DELETED 상태 차단 (LOCKED는 수정 허용 - display name 변경은 ok)
+     * 3. username 변경 후 UserResult 반환 (Keycloak 동기화 불필요 - user DB의 display name만 변경)
+     */
+    @Transactional
+    public UserResult updateProfile(String keycloakId, UpdateProfileCommand command) {
+        Objects.requireNonNull(keycloakId, "keycloakId는 null일 수 없습니다.");
+
+        // 1. keycloakId로 사용자 조회
+        User user = userRepository.findByKeycloakId(keycloakId)
+            .orElseThrow(() -> {
+                log.warn("[updateProfile] 존재하지 않는 사용자 - keycloakId: {}", mask(keycloakId));
+                return new UserException(UserErrorCode.USER_NOT_FOUND);
+            });
+
+        // 2. 유효성 체크 후 수정 (엔티티 비즈니스 메서드로 이관)
+        user.updateProfile(command.username());
+
+        log.info("[updateProfile] 정보 수정 완료 - userId: {}", mask(user.getId()));
+        return UserResult.from(user);
+    }
+
+    /**
+     * 회원 탈퇴 (본인)
+     * 처리 흐름
+     * 1. keycloakId로 사용자 조회
+     * 2. DB Soft Delete (status=DELETED, deletedBy=본인 DB PK)
+     * 3. Keycloak 계정 비활성화 (로그인 차단)
+     * 4. Redis Refresh Token 즉시 삭제 (현재 세션 무효화)
+     *
+     */
+    //TODO:DB 커밋 성공 후 Keycloak 호출 실패 시 불일치 발생 가능 -> MVP 구현 후 @TransactionalEventListener(AFTER_COMMIT) 또는 Outbox 패턴 적용 예정
+    @Transactional
+    public void withdraw(String keycloakId) {
+        Objects.requireNonNull(keycloakId, "keycloakId는 null일 수 없습니다.");
+
+        // 1. keycloakId로 사용자 조회
+        User user = userRepository.findByKeycloakId(keycloakId)
+            .orElseThrow(() -> {
+                log.warn("[withdraw] 존재하지 않는 사용자 - keycloakId: {}", mask(keycloakId));
+                return new UserException(UserErrorCode.USER_NOT_FOUND);
+            });
+
+        // 2. DB Soft Delete - user.softDelete() 내부에서 DELETED 상태 이중 전이 방지
+        user.softDelete(user.getId());
+
+        // 3. Keycloak 계정 비활성화 - 이후 로그인 불가
+        // 실패 시 UserException 발생 -> @Transactional 롤백 -> DB softDelete 취소
+        keycloakAuthService.disableUser(user.getKeycloakId());
+
+        // 4. Redis Refresh Token 즉시 삭제 - 현재 세션 즉시 무효화
+        refreshTokenStore.delete(user.getId());
+
+        log.info("[withdraw] 회원탈퇴 완료 - userId: {}", mask(user.getId()));
+    }
+
+    //UUID 마스킹
+    private static String mask(UUID uuid) {
+        if (uuid == null)
+            return "null";
+        return uuid.toString().substring(0, 8) + "-****-****-****-************";
+    }
+
+    // mask(String) 오버로드 - keycloakId는 String으로 전달되는 케이스 대응
+    private static String mask(String id) {
+        if (id == null || id.length() < 8)
+            return "****";
+        return id.substring(0, 8) + "-****-****-****-************";
     }
 }

@@ -1,18 +1,19 @@
 package com.firstticket.userservice.presentation;
 
-import com.firstticket.common.exception.GlobalExceptionHandler;
-import com.firstticket.userservice.application.HostRequestCommandService;
-import com.firstticket.userservice.application.HostRequestQueryService;
-import com.firstticket.userservice.application.UserCommandService;
-import com.firstticket.userservice.application.UserQueryService;
-import com.firstticket.userservice.application.dto.result.HostRequestResult;
-import com.firstticket.userservice.application.dto.result.UserResult;
-import com.firstticket.userservice.domain.HostRequestStatus;
-import com.firstticket.userservice.domain.UserRole;
-import com.firstticket.userservice.domain.UserStatus;
-import com.firstticket.userservice.domain.exception.UserErrorCode;
-import com.firstticket.userservice.domain.exception.UserException;
-import com.firstticket.userservice.domain.query.UserSummaryData;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.restdocs.headers.HeaderDocumentation.*;
+import static org.springframework.restdocs.mockmvc.MockMvcRestDocumentation.*;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.*;
+import static org.springframework.restdocs.operation.preprocess.Preprocessors.*;
+import static org.springframework.restdocs.payload.PayloadDocumentation.*;
+import static org.springframework.restdocs.request.RequestDocumentation.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -28,29 +29,20 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.UUID;
+import com.firstticket.common.exception.GlobalExceptionHandler;
+import com.firstticket.userservice.application.HostRequestCommandService;
+import com.firstticket.userservice.application.HostRequestQueryService;
+import com.firstticket.userservice.application.UserCommandService;
+import com.firstticket.userservice.application.UserQueryService;
+import com.firstticket.userservice.application.dto.result.HostRequestResult;
+import com.firstticket.userservice.application.dto.result.UserResult;
+import com.firstticket.userservice.domain.HostRequestStatus;
+import com.firstticket.userservice.domain.UserRole;
+import com.firstticket.userservice.domain.UserStatus;
+import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
+import com.firstticket.userservice.domain.query.UserSummaryData;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
-import static org.springframework.restdocs.headers.HeaderDocumentation.headerWithName;
-import static org.springframework.restdocs.headers.HeaderDocumentation.requestHeaders;
-import static org.springframework.restdocs.mockmvc.MockMvcRestDocumentation.document;
-import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.delete;
-import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.get;
-import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.patch;
-import static org.springframework.restdocs.operation.preprocess.Preprocessors.preprocessRequest;
-import static org.springframework.restdocs.operation.preprocess.Preprocessors.preprocessResponse;
-import static org.springframework.restdocs.operation.preprocess.Preprocessors.prettyPrint;
-import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
-import static org.springframework.restdocs.payload.PayloadDocumentation.relaxedResponseFields;
-import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
-import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
-import static org.springframework.restdocs.request.RequestDocumentation.parameterWithName;
-import static org.springframework.restdocs.request.RequestDocumentation.pathParameters;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * 설계 결정 사항
@@ -302,6 +294,24 @@ class AdminControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"));
         }
+
+        @Test
+        @DisplayName("X-User-Role 헤더가 없으면 401 Unauthorized를 반환한다")
+        void 인증_없음_401() throws Exception {
+            mockMvc.perform(get("/api/v1/admin/users/{userId}", UUID.randomUUID()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        }
+
+        @Test
+        @DisplayName("ADMIN이 아닌 역할로 접근 시 403 Forbidden을 반환한다")
+        void 권한_없음_403() throws Exception {
+            mockMvc.perform(get("/api/v1/admin/users/{userId}", UUID.randomUUID())
+                    .header("X-User-Role", "CUSTOMER")
+                    .header("X-User-Id", UUID.randomUUID().toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
     }
 
     @Nested
@@ -382,6 +392,26 @@ class AdminControllerTest {
                     )
                 ));
         }
+
+        @Test
+        @DisplayName("역할 헤더 없을 때 401 반환")
+        void changeRole_401() throws Exception {
+            mockMvc.perform(patch("/api/v1/users/{userId}/role", UUID.randomUUID())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"role\": \"HOST\"}"))
+                .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @DisplayName("ADMIN 아닌 역할은 403 반환")
+        void changeRole_403() throws Exception {
+            mockMvc.perform(patch("/api/v1/users/{userId}/role", UUID.randomUUID())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"role\": \"HOST\"}")
+                    .header("X-User-Id", UUID.randomUUID().toString())
+                    .header("X-User-Role", "CUSTOMER"))
+                .andExpect(status().isForbidden());
+        }
     }
 
     @Nested
@@ -428,6 +458,24 @@ class AdminControllerTest {
                         fieldWithPath("data.totalPages").description("전체 페이지 수")
                     )
                 ));
+        }
+
+        @Test
+        @DisplayName("X-User-Role 헤더가 없으면 401 Unauthorized를 반환한다")
+        void 인증_없음_401() throws Exception {
+            mockMvc.perform(get("/api/v1/admin/host-requests"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        }
+
+        @Test
+        @DisplayName("ADMIN이 아닌 역할로 접근 시 403 Forbidden을 반환한다")
+        void 권한_없음_403() throws Exception {
+            mockMvc.perform(get("/api/v1/admin/host-requests")
+                    .header("X-User-Role", "HOST")
+                    .header("X-User-Id", UUID.randomUUID().toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
         }
     }
 
@@ -559,6 +607,26 @@ class AdminControllerTest {
                         """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+        }
+
+        @Test
+        @DisplayName("역할 헤더 없을 때 401 반환")
+        void changeRole_401() throws Exception {
+            mockMvc.perform(patch("/api/v1/users/{userId}/role", UUID.randomUUID())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"role\": \"HOST\"}"))
+                .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @DisplayName("ADMIN 아닌 역할은 403 반환")
+        void changeRole_403() throws Exception {
+            mockMvc.perform(patch("/api/v1/users/{userId}/role", UUID.randomUUID())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"role\": \"HOST\"}")
+                    .header("X-User-Id", UUID.randomUUID().toString())
+                    .header("X-User-Role", "CUSTOMER"))
+                .andExpect(status().isForbidden());
         }
     }
 }

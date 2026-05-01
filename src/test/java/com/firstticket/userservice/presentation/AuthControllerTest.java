@@ -1,13 +1,16 @@
 package com.firstticket.userservice.presentation;
 
-import com.firstticket.common.exception.GlobalExceptionHandler;
-import com.firstticket.userservice.application.UserCommandService;
-import com.firstticket.userservice.application.dto.result.TokenResult;
-import com.firstticket.userservice.application.dto.result.UserResult;
-import com.firstticket.userservice.domain.UserRole;
-import com.firstticket.userservice.domain.UserStatus;
-import com.firstticket.userservice.domain.exception.UserErrorCode;
-import com.firstticket.userservice.domain.exception.UserException;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.restdocs.headers.HeaderDocumentation.*;
+import static org.springframework.restdocs.mockmvc.MockMvcRestDocumentation.*;
+import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.*;
+import static org.springframework.restdocs.operation.preprocess.Preprocessors.*;
+import static org.springframework.restdocs.payload.PayloadDocumentation.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import java.util.UUID;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -16,25 +19,25 @@ import org.springframework.boot.test.autoconfigure.restdocs.AutoConfigureRestDoc
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 
-import java.util.UUID;
+import com.firstticket.common.exception.GlobalExceptionHandler;
+import com.firstticket.common.response.ApiResponse;
+import com.firstticket.common.response.CommonErrorCode;
+import com.firstticket.userservice.application.UserCommandService;
+import com.firstticket.userservice.application.dto.result.TokenResult;
+import com.firstticket.userservice.application.dto.result.UserResult;
+import com.firstticket.userservice.domain.UserRole;
+import com.firstticket.userservice.domain.UserStatus;
+import com.firstticket.userservice.domain.exception.UserErrorCode;
+import com.firstticket.userservice.domain.exception.UserException;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.when;
-import static org.springframework.restdocs.mockmvc.MockMvcRestDocumentation.document;
-import static org.springframework.restdocs.mockmvc.RestDocumentationRequestBuilders.post;
-import static org.springframework.restdocs.operation.preprocess.Preprocessors.preprocessRequest;
-import static org.springframework.restdocs.operation.preprocess.Preprocessors.preprocessResponse;
-import static org.springframework.restdocs.operation.preprocess.Preprocessors.prettyPrint;
-import static org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath;
-import static org.springframework.restdocs.payload.PayloadDocumentation.requestFields;
-import static org.springframework.restdocs.payload.PayloadDocumentation.responseFields;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 설계 결정 사항
@@ -43,6 +46,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * - AuthController.logout()은 @RequestHeader를 직접 사용하므로 헤더 기반 인증과 동일하게 처리
  * - signup / login / refreshToken 은 Gateway PUBLIC_PATHS → X-User-Id 헤더 불필요
  */
+
+@Slf4j
 @WebMvcTest(AuthController.class) // AuthController 슬라이스만 로드
 @AutoConfigureRestDocs
 @ActiveProfiles("test") // Config Server 비활성화 (application-test.yaml)
@@ -54,6 +59,13 @@ class AuthControllerTest {
 
     @MockitoBean
     private UserCommandService userCommandService;
+
+    // @RequestHeader 필수 헤더 누락 → 인증 헤더(X-User-Id 등)가 없는 것이므로 401 처리
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingHeader(MissingRequestHeaderException e) {
+        log.warn("[MissingRequestHeaderException] header: {}", e.getHeaderName());
+        return ApiResponse.error(CommonErrorCode.UNAUTHORIZED);
+    }
 
     @Nested
     @DisplayName("POST /api/v1/auth/signup - 회원가입")
@@ -254,22 +266,21 @@ class AuthControllerTest {
         @Test
         @DisplayName("X-User-Id 헤더가 있으면 Redis Refresh Token을 삭제하고 204 No Content를 반환한다")
         void 로그아웃_성공() throws Exception {
-            // given - logout()은 반환값 없음 (void), Redis 삭제 후 204
             doNothing().when(userCommandService).logout(any());
-
             String keycloakId = UUID.randomUUID().toString();
 
-            // when & then
-            // NOTE: logout은 AuthContext가 아닌 @RequestHeader("X-User-Id")를 직접 사용합니다.
-            //       Gateway가 항상 X-User-Id를 주입하므로, 컨트롤러 테스트에서는 헤더 포함이 정상 경로입니다.
             mockMvc.perform(post("/api/v1/auth/logout")
-                    .header("X-User-Id", keycloakId))  // Gateway 주입 헤더 시뮬레이션
+                    .header("X-User-Id", keycloakId))
                 .andExpect(status().isNoContent())
                 .andDo(document("auth-logout",
                     preprocessRequest(prettyPrint()),
-                    preprocessResponse(prettyPrint())
-                    // 204 No Content — 응답 body 없음
-                ));
+                    preprocessResponse(prettyPrint()),
+                    requestHeaders(  // ← 기존에 빠져 있던 헤더 문서 추가
+                        headerWithName("X-User-Id").description
+                            ("Gateway가 JWT sub 클레임에서 추출하여 주입한 keycloak 사용자 ID")
+                        )
+                        // 204 No Content — 응답 body 없음
+                    ));
         }
     }
 

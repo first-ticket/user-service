@@ -1,8 +1,11 @@
 package com.firstticket.userservice.infrastructure.persistence;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.firstticket.userservice.domain.HostRequest;
@@ -21,8 +24,11 @@ public interface HostRequestJpaRepository extends JpaRepository<HostRequest, UUI
     Optional<HostRequest> findByUserIdAndStatus(UUID userId, HostRequestStatus status);
 
     /**
-     * 특정 사용자의 특정 상태 신청 존재 여부 - EXISTS 쿼리로 성능 최적화.
+     * 특정 사용자의 특정 상태 신청 존재 여부
      * 중복 PENDING 신청 방지에 사용
      */
     boolean existsByUserIdAndStatus(UUID userId, HostRequestStatus status);
+
+    // status 조건 + 페이지네이션 조회
+    Page<HostRequest> findAllByStatus(HostRequestStatus status, Pageable pageable);
 }

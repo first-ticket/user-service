@@ -1,13 +1,15 @@
 package com.firstticket.userservice.infrastructure.persistence;
 
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.stereotype.Repository;
+
 import com.firstticket.userservice.domain.HostRequest;
 import com.firstticket.userservice.domain.HostRequestRepository;
 import com.firstticket.userservice.domain.HostRequestStatus;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Repository;
 
-import java.util.Optional;
-import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 
 /**
  * HostRequestRepository 도메인 인터페이스의 JPA 구현체

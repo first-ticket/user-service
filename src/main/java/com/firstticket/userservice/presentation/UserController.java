@@ -4,13 +4,17 @@ import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.firstticket.common.response.ApiResponse;
 import com.firstticket.common.web.AuthContext;
+import com.firstticket.userservice.application.HostRequestCommandService;
 import com.firstticket.userservice.application.UserQueryService;
+import com.firstticket.userservice.application.dto.result.HostRequestResult;
 import com.firstticket.userservice.application.dto.result.UserResult;
+import com.firstticket.userservice.presentation.dto.response.HostRequestResponse;
 import com.firstticket.userservice.presentation.dto.response.UserResponse;
 
 import lombok.RequiredArgsConstructor;
@@ -34,6 +38,7 @@ import lombok.extern.slf4j.Slf4j;
 public class UserController {
 
     private final UserQueryService userQueryService;
+    private final HostRequestCommandService hostRequestCommandService;
 
     /**
      * 내 정보 조회 API
@@ -59,6 +64,31 @@ public class UserController {
         return ApiResponse.success(
             UserSuccessCode.USER_FOUND,
             UserResponse.from(result)
+        );
+    }
+
+    /**
+     * HOST 신청 API
+     * POST /api/v1/users/me/host-requests
+     *
+     * Gateway의 X-User-Id 헤더로 신청자 UUID를 식별합니다.
+     * 요청 바디 없음
+     *
+     * @return 201 Created + HostRequestResponse (id, userId, status: PENDING, createdAt)
+     *
+     * 오류 응답:
+     *   401 Unauthorized - X-User-Id 헤더 누락
+     *   409 Conflict     - 이미 PENDING 상태의 신청이 존재
+     */
+    @PostMapping("/me/host-requests")
+    public ResponseEntity<ApiResponse<HostRequestResponse>> requestHost() {
+        UUID keycloakId = AuthContext.getUserId();
+
+        HostRequestResult result = hostRequestCommandService.request(keycloakId);
+
+        return ApiResponse.success(
+            UserSuccessCode.HOST_REQUEST_CREATED,
+            HostRequestResponse.from(result)
         );
     }
 }

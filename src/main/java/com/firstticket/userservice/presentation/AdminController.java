@@ -5,13 +5,18 @@ import com.firstticket.common.response.ApiResponse;
 import com.firstticket.common.response.CommonErrorCode;
 import com.firstticket.common.web.AuthContext;
 import com.firstticket.common.web.UserRole;
+import com.firstticket.userservice.application.HostRequestCommandService;
+import com.firstticket.userservice.application.HostRequestQueryService;
 import com.firstticket.userservice.application.UserCommandService;
 import com.firstticket.userservice.application.UserQueryService;
+import com.firstticket.userservice.application.dto.result.HostRequestResult;
 import com.firstticket.userservice.application.dto.result.UserResult;
 import com.firstticket.userservice.domain.query.UserSummaryData;
+import com.firstticket.userservice.presentation.dto.request.ApproveRejectRequest;
 import com.firstticket.userservice.presentation.dto.request.ChangeRoleRequest;
 import com.firstticket.userservice.presentation.dto.request.UserSearchRequest;
 import com.firstticket.userservice.presentation.dto.response.AdminUserResponse;
+import com.firstticket.userservice.presentation.dto.response.HostRequestResponse;
 import com.firstticket.userservice.presentation.dto.response.UserResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +26,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -42,6 +48,8 @@ public class AdminController {
 
     private final UserQueryService userQueryService;
     private final UserCommandService userCommandService;
+    private final HostRequestCommandService hostRequestCommandService;
+    private final HostRequestQueryService hostRequestQueryService;
 
     /**
      * 사용자 목록 조회 (동적 검색 + 페이지네이션)
@@ -160,6 +168,63 @@ public class AdminController {
         return ApiResponse.success(
             UserSuccessCode.ROLE_CHANGED,
             UserResponse.from(result)
+        );
+    }
+
+    /**
+     * PENDING HOST 신청 목록 조회 (페이지네이션)
+     * GET /api/v1/admin/host-requests?page=0&size=10&sort=createdAt,desc
+     *
+     * @param pageable 페이지 정보
+     * @return 200 OK + Page<HostRequestResponse> (PENDING 상태만)
+     *
+     * 오류 응답:
+     *   401 Unauthorized - X-User-Role 헤더 누락
+     *   403 Forbidden    - ADMIN 이외의 역할
+     */
+    @GetMapping("/api/v1/admin/host-requests")
+    public ResponseEntity<ApiResponse<Page<HostRequestResponse>>> getHostRequests(Pageable pageable) {
+        AuthContext.requireRole(UserRole.ADMIN);
+
+        // Page<HostRequestResult> → Page<HostRequestResponse> 변환
+        Page<HostRequestResponse> responses = hostRequestQueryService.getHostRequests(pageable)
+            .map(HostRequestResponse::from);
+
+        return ApiResponse.success(UserSuccessCode.HOST_REQUEST_LIST_FOUND, responses);
+    }
+
+    /**
+     * HOST 신청 승인/거절
+     * PATCH /api/v1/admin/host-requests/{requestId}
+     * Body: { "action": "APPROVE" | "REJECT" }
+     *
+     * @param requestId 처리할 HOST 신청 UUID
+     * @param request   액션 (APPROVE / REJECT)
+     * @return 200 OK + HostRequestResponse (처리 결과)
+     *
+     * 오류 응답:
+     *   400 Bad Request  - action 필드 누락
+     *   401 Unauthorized - X-User-Role 헤더 누락
+     *   403 Forbidden    - ADMIN 이외의 역할
+     *   404 Not Found    - 존재하지 않는 requestId
+     *   409 Conflict     - 이미 처리된 신청
+     */
+    @PatchMapping("/api/v1/admin/host-requests/{requestId}")
+    public ResponseEntity<ApiResponse<HostRequestResponse>> approveOrReject(
+        @PathVariable UUID requestId,
+        @RequestBody @Valid ApproveRejectRequest request
+    ) {
+        // 1. 권한 검증 -> 2. adminId 추출
+        AuthContext.requireRole(UserRole.ADMIN);
+        UUID adminId = AuthContext.getUserId();
+
+        HostRequestResult result = hostRequestCommandService.approveOrReject(
+            requestId, request.action(), adminId
+        );
+
+        return ApiResponse.success(
+            UserSuccessCode.HOST_REQUEST_PROCESSED,
+            HostRequestResponse.from(result)
         );
     }
 }

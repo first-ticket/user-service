@@ -1,7 +1,11 @@
 package com.firstticket.userservice.domain;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 /**
  * HostRequest Aggregate 명령(Command) 전용 Repository 인터페이스
@@ -29,4 +33,6 @@ public interface HostRequestRepository {
      *   existsByUserIdAndStatus(userId, HostRequestStatus.PENDING)
      */
     boolean existsByUserIdAndStatus(UUID userId, HostRequestStatus status);
+
+    Page<HostRequest> findAllByStatus(HostRequestStatus status, Pageable pageable);
 }

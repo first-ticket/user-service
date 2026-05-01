@@ -137,7 +137,7 @@ public class User extends BaseUserEntity {
      */
     public void changeRole(UserRole newRole) {
         if (this.status == UserStatus.DELETED) {
-            throw new UserException(UserErrorCode.USER_NOT_FOUND);
+            throw new UserException(UserErrorCode.USER_ALREADY_DELETED);
         }
         this.role = newRole;
     }

@@ -24,6 +24,7 @@ public enum UserErrorCode implements ErrorCode {
     HOST_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "HOST 신청 요청을 찾을 수 없습니다."),
     INVALID_HOST_REQUEST_STATUS(HttpStatus.BAD_REQUEST, "허용되지 않은 HOST 신청 상태 전이입니다."),
     HOST_REQUEST_ALREADY_PENDING(HttpStatus.CONFLICT, "이미 검토 중인 HOST 신청이 존재합니다."),
+    HOST_REQUEST_ONLY_FOR_CUSTOMER(HttpStatus.FORBIDDEN, "CUSTOMER 계정만 HOST 신청이 가능합니다."),
 
     // Token
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."),

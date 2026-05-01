@@ -49,6 +49,9 @@ public class HostRequestCommandService {
     @Transactional
     public HostRequestResult request(UUID keycloakId) {
 
+        // keycloakId null 방어
+        Objects.requireNonNull(keycloakId, "keycloakId 값은 null일 수 없습니다.");
+
         // 1. Keycloak ID로 User 조회 - X-User-Id는 JWT sub(= keycloakId)이므로 findByKeycloakId() 사용
         User user = userRepository.findByKeycloakId(keycloakId.toString())
             .orElseThrow(() -> {
@@ -78,9 +81,13 @@ public class HostRequestCommandService {
                 mask(user.getId()), mask(saved.getId()));
             return HostRequestResult.from(saved);
         } catch (DataIntegrityViolationException e) {
-            // unique constraint 위반 = 동시 요청으로 PENDING이 이미 생성된 경우
-            log.warn("[hostRequest] 동시 요청으로 인한 PENDING 충돌 - userId: {}", mask(user.getId()));
-            throw new UserException(UserErrorCode.HOST_REQUEST_ALREADY_PENDING);
+            // 지적 2: uq_host_requests_user_pending 충돌인 경우만 409로 변환
+            // FK 위반(user_id), CHECK 위반(status) 등 다른 제약 위반은 그대로 전파
+            if (isPendingDuplicateViolation(e)) {
+                log.warn("[hostRequest] 동시 요청으로 인한 PENDING 충돌 - userId: {}", mask(user.getId()));
+                throw new UserException(UserErrorCode.HOST_REQUEST_ALREADY_PENDING);
+            }
+            throw e;
         }
     }
 
@@ -119,7 +126,7 @@ public class HostRequestCommandService {
                 .orElseThrow(() -> {
                     // 데이터 정합성 오류 — 운영 추적을 위해 userId 원문 기록
                     log.error("[approveOrReject] 신청자 User 없음 - 데이터 정합성 오류. userId: {}",
-                        hostRequest.getUserId());
+                        mask(hostRequest.getUserId()));
                     return new UserException(UserErrorCode.USER_NOT_FOUND);
                 });
 
@@ -152,5 +159,16 @@ public class HostRequestCommandService {
     private static String mask(UUID uuid) {
         if (uuid == null) return "null";
         return uuid.toString().substring(0, 8) + "-****-****-****-************";
+    }
+
+    /**
+     * DataIntegrityViolationException이 PENDING 중복 unique 충돌인지 판별합니다.
+     * DB 인덱스명(uq_host_requests_user_pending)이 예외 메시지에 포함되어 있으면 해당 충돌로 간주합니다.
+     */
+    private static boolean isPendingDuplicateViolation(DataIntegrityViolationException e) {
+        Throwable cause = e.getMostSpecificCause();
+        return cause != null
+            && cause.getMessage() != null
+            && cause.getMessage().contains("uq_host_requests_user_pending");
     }
 }

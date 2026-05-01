@@ -3,6 +3,7 @@ plugins {
 	id 'org.springframework.boot' version '3.5.13'
 	id 'io.spring.dependency-management' version '1.1.7'
     id 'org.asciidoctor.jvm.convert' version '3.3.2'
+    id 'jacoco'
 }
 
 group = 'com.first-ticket'
@@ -188,5 +189,58 @@ bootJar {
     dependsOn asciidoctor
     from(layout.buildDirectory.dir("docs/asciidoc")) {
         into 'static/docs'
+    }
+}
+
+// ===== JaCoCo 테스트 커버리지 =====
+
+// JaCoCo 에이전트 버전 고정 (Spring Boot 3.x 호환)
+jacoco {
+    toolVersion = '0.8.12'
+}
+
+// jacocoTestReport — test task 실행 후 HTML/XML 리포트 생성
+// 실행: ./gradlew test jacocoTestReport
+// 결과: build/reports/jacoco/test/html/index.html
+jacocoTestReport {
+    dependsOn test  // test가 먼저 실행되어야 .exec 파일이 생성됨
+
+    reports {
+        html.required = true   // build/reports/jacoco/test/html/index.html
+        xml.required  = true   // CI 도구(SonarQube 등)와 연동 시 필요
+        csv.required  = false  // 불필요하면 false
+    }
+
+    // 커버리지 측정 제외 대상
+    // 이유: 생성 코드·설정 클래스·DTO는 비즈니스 로직이 없으므로 커버리지 대상에서 제외
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, excludes: [
+                // QueryDSL APT가 자동 생성한 Q-클래스 (테스트 대상 아님)
+                '**/Q*.class',
+
+                // Spring Boot 진입점 — 테스트 환경에서 실행되지 않음
+                '**/*Application.class',
+
+                // 설정 클래스 — 빈 등록/환경설정, 비즈니스 로직 없음
+                '**/*Config.class',
+                '**/*Properties.class',
+                '**/*AutoConfiguration.class',
+
+                // Presentation DTO (request/response) — record, 단순 데이터 컨테이너
+                '**/presentation/dto/**',
+
+                // Application DTO (command/result) — record, 단순 데이터 컨테이너
+                '**/application/dto/**',
+
+                // 도메인 쿼리 DTO — Querydsl Projection 전용 record
+                '**/domain/query/UserSummaryData.class',
+                '**/domain/query/UserSearchSpec.class',
+
+                // Enum ErrorCode / SuccessCode — 상수 정의만 존재
+                '**/*ErrorCode.class',
+                '**/*SuccessCode.class',
+            ])
+        }))
     }
 }

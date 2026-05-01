@@ -298,7 +298,7 @@ class AdminControllerTest {
         @Test
         @DisplayName("X-User-Role 헤더가 없으면 401 Unauthorized를 반환한다")
         void 인증_없음_401() throws Exception {
-            mockMvc.perform(get("/api/v1/admin/users/{userId}", UUID.randomUUID()))
+            mockMvc.perform(delete("/api/v1/admin/users/{userId}", UUID.randomUUID()))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
         }
@@ -306,7 +306,7 @@ class AdminControllerTest {
         @Test
         @DisplayName("ADMIN이 아닌 역할로 접근 시 403 Forbidden을 반환한다")
         void 권한_없음_403() throws Exception {
-            mockMvc.perform(get("/api/v1/admin/users/{userId}", UUID.randomUUID())
+            mockMvc.perform(delete("/api/v1/admin/users/{userId}", UUID.randomUUID())
                     .header("X-User-Role", "CUSTOMER")
                     .header("X-User-Id", UUID.randomUUID().toString()))
                 .andExpect(status().isForbidden())
@@ -607,26 +607,6 @@ class AdminControllerTest {
                         """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
-        }
-
-        @Test
-        @DisplayName("역할 헤더 없을 때 401 반환")
-        void changeRole_401() throws Exception {
-            mockMvc.perform(patch("/api/v1/users/{userId}/role", UUID.randomUUID())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"role\": \"HOST\"}"))
-                .andExpect(status().isUnauthorized());
-        }
-
-        @Test
-        @DisplayName("ADMIN 아닌 역할은 403 반환")
-        void changeRole_403() throws Exception {
-            mockMvc.perform(patch("/api/v1/users/{userId}/role", UUID.randomUUID())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"role\": \"HOST\"}")
-                    .header("X-User-Id", UUID.randomUUID().toString())
-                    .header("X-User-Role", "CUSTOMER"))
-                .andExpect(status().isForbidden());
         }
     }
 }

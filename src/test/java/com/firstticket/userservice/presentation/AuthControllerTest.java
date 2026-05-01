@@ -19,16 +19,11 @@ import org.springframework.boot.test.autoconfigure.restdocs.AutoConfigureRestDoc
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.web.bind.MissingRequestHeaderException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 
 import com.firstticket.common.exception.GlobalExceptionHandler;
-import com.firstticket.common.response.ApiResponse;
-import com.firstticket.common.response.CommonErrorCode;
 import com.firstticket.userservice.application.UserCommandService;
 import com.firstticket.userservice.application.dto.result.TokenResult;
 import com.firstticket.userservice.application.dto.result.UserResult;
@@ -59,13 +54,6 @@ class AuthControllerTest {
 
     @MockitoBean
     private UserCommandService userCommandService;
-
-    // @RequestHeader 필수 헤더 누락 → 인증 헤더(X-User-Id 등)가 없는 것이므로 401 처리
-    @ExceptionHandler(MissingRequestHeaderException.class)
-    public ResponseEntity<ApiResponse<Void>> handleMissingHeader(MissingRequestHeaderException e) {
-        log.warn("[MissingRequestHeaderException] header: {}", e.getHeaderName());
-        return ApiResponse.error(CommonErrorCode.UNAUTHORIZED);
-    }
 
     @Nested
     @DisplayName("POST /api/v1/auth/signup - 회원가입")

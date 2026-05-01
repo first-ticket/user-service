@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.5.13'
 	id 'io.spring.dependency-management' version '1.1.7'
+    id 'org.asciidoctor.jvm.convert' version '3.3.2'
 }
 
 group = 'com.first-ticket'
@@ -53,6 +54,7 @@ repositories {
 
 ext {
 	set('springCloudVersion', "2025.0.2")
+    set('snippetsDir', file("build/generated-snippets"))
 }
 
 dependencyManagement {
@@ -61,8 +63,12 @@ dependencyManagement {
 	}
 }
 
-// Querydsl Q클래스 생성 경로 (build 디렉토리 내부로 지정해 clean 시 자동 삭제)
 def querydslDir = layout.buildDirectory.dir("generated/querydsl").get().asFile
+
+// Asciidoctor 확장 의존성 전용 설정 (spring-restdocs-asciidoctor)
+configurations {
+    asciidoctorExt
+}
 
 configurations.all {
 	resolutionStrategy {
@@ -125,6 +131,12 @@ dependencies {
 	testAnnotationProcessor 'org.projectlombok:lombok'
 	testRuntimeOnly         'org.junit.platform:junit-platform-launcher'
 	testImplementation 'com.h2database:h2' // 테스트 전용 인메모리 DB
+
+    // ===== REST Docs =====
+    // MockMvc 기반 테스트에서 스니펫 자동 생성
+    testImplementation 'org.springframework.restdocs:spring-restdocs-mockmvc'
+    // AsciiDoc 빌드 시 스니펫을 HTML로 변환하는 Asciidoctor 확장
+    asciidoctorExt 'org.springframework.restdocs:spring-restdocs-asciidoctor'
 }
 
 // QueryDSL Q클래스 생성 경로를 컴파일 소스에 포함
@@ -138,7 +150,35 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+    outputs.dir snippetsDir
+    useJUnitPlatform()
+    systemProperty 'spring.cloud.config.enabled', 'false'
+}
+
+asciidoctor {
+    inputs.dir snippetsDir // 스니펫 디렉토리를 입력으로 등록
+    dependsOn test // test 완료 후 실행
+    configurations 'asciidoctorExt'
+    baseDirFollowsSourceFile() // .adoc 파일 기준으로 include:: 상대 경로 해석
+}
+
+// 기존 static/docs 디렉토리를 초기화하여 이전 빌드 산출물 충돌 방지
+tasks.named('asciidoctor') {
+    doFirst {
+        delete file('src/main/resources/static/docs')
+    }
+}
+
+// 빌드된 HTML 문서를 Spring Boot static 리소스 경로로 복사
+// app 실행 시 /docs/index.html 로 접근 가능
+tasks.register('copyDocument', Copy) {
+    dependsOn asciidoctor
+    from layout.buildDirectory.dir("docs/asciidoc")
+    into layout.projectDirectory.dir("src/main/resources/static/docs")
+}
+
+tasks.named('build') {
+    dependsOn copyDocument
 }
 
 // clean 시 Q클래스 생성 디렉토리도 함께 삭제
@@ -147,6 +187,11 @@ clean {
 }
 
 // ECS 배포 시 이미지 레이어 최적화를 위해 파일명 고정
+// 빌드된 REST Docs HTML을 JAR 내부 static/docs 경로에 포함
 bootJar {
-	archiveFileName = 'app.jar'
+    archiveFileName = 'app.jar'
+    dependsOn asciidoctor
+    from(layout.buildDirectory.dir("docs/asciidoc")) {
+        into 'static/docs'
+    }
 }

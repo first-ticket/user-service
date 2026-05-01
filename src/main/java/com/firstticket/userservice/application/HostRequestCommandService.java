@@ -13,9 +13,12 @@ import com.firstticket.userservice.domain.service.KeycloakAuthService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -68,11 +71,17 @@ public class HostRequestCommandService {
 
         // 4. HostRequest 생성 - userId는 DB PK (host_requests.user_id FK)
         HostRequest hostRequest = HostRequest.create(user.getId());
-        HostRequest saved = hostRequestRepository.save(hostRequest);
 
-        log.info("[hostRequest] HOST 신청 완료 - userId: {}, requestId: {}",
-            mask(user.getId()), mask(saved.getId()));
-        return HostRequestResult.from(saved);
+        try {
+            HostRequest saved = hostRequestRepository.save(hostRequest);
+            log.info("[hostRequest] HOST 신청 완료 - userId: {}, requestId: {}",
+                mask(user.getId()), mask(saved.getId()));
+            return HostRequestResult.from(saved);
+        } catch (DataIntegrityViolationException e) {
+            // unique constraint 위반 = 동시 요청으로 PENDING이 이미 생성된 경우
+            log.warn("[hostRequest] 동시 요청으로 인한 PENDING 충돌 - userId: {}", mask(user.getId()));
+            throw new UserException(UserErrorCode.HOST_REQUEST_ALREADY_PENDING);
+        }
     }
 
     /**
@@ -91,6 +100,8 @@ public class HostRequestCommandService {
      */
     @Transactional
     public HostRequestResult approveOrReject(UUID requestId, HostRequestAction action, UUID adminId) {
+
+        Objects.requireNonNull(action, "action 값은 null일 수 없습니다.");
 
         // 1. HostRequest 조회
         HostRequest hostRequest = hostRequestRepository.findById(requestId)

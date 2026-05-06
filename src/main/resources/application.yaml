@@ -1,3 +1,5 @@
+# user-service/application.yaml
+
 spring:
   application:
     name: user-service  # Eureka 등록명 / Config Server 설정 경로명으로 사용

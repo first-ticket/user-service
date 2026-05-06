@@ -1,9 +1,12 @@
 -- V1: users 테이블 생성
 -- User Aggregate 의 persistence 저장소
--- createdBy 는 JPA Auditing(SecurityAuditorAware)이 자동 주입하므로
--- NOT NULL 제약을 DB 레벨에서도 동일하게 적용합니다.
+-- Flyway의 create-schemas: true 가 스키마를 생성하지만,
+-- SQL 내에서도 명시적으로 보장하기 위해 IF NOT EXISTS 구문 사용
+-- (멱등성 확보 - 이미 존재해도 오류 없이 통과)
 
-CREATE TABLE users
+CREATE SCHEMA IF NOT EXISTS user_schema;
+
+CREATE TABLE user_schema.users
 (
     -- PK: PostgreSQL 내장 함수 gen_random_uuid() 로 UUID v4 자동 생성
     id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -39,4 +42,4 @@ CREATE TABLE users
 
 -- LOWER(email) 기준 unique index → 대소문자 무관 중복 방지
 -- ex) test@email.com / Test@email.com는 동일한 이메일로 간주 및 처리
-CREATE UNIQUE INDEX uq_users_email_lower ON users (LOWER(email));
+CREATE UNIQUE INDEX uq_users_email_lower ON user_schema.users (LOWER(email));

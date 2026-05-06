@@ -1,0 +1,189 @@
+### user-service HttpClient 테스트 사용법
+### 20260506 기준 로컬테스트 방법
+### 1. infra docker 실행 (postgres, keycloak, kafka, redis)
+### 2. eureka server 실행 (port:8761)
+### 3. gateway server 실행 (port:8080)
+### 4. config server 실행 (port:8888)
+### 5. user-service 실행 (port:8081) - .env 추가했는지 필히 확인! (팀노션 참고)
+### 6. 상단 Run with:  local
+### 7. 하나씩 테스트해보기
+### 8. admin 전용 요청은 admin 계정으로 로그인해서 adminAccessToken 변수를 등록해야 합니다.
+### 9. {userId}, {requestId} 부분은 직접 테스트 희망하는 id값으로 삽입
+
+### ============ DB 확인 방법 =============
+### IntelliJ Database 기준
+### Host:localhost
+### Port: 5432
+### User: postgres
+### Password: postgres
+### Database: first_ticket
+### URL: jdbc:postgresql://localhost:5432/first_ticket
+### 입력 후 Test Connection > 정상이면 Apply > OK
+### 스키마 안보이면 first_ticket@localhost 1 of 2 << 클릭 -> All Schemas 체크
+### first_ticket/user_schema/tables/users 에서 테스트 계정 3개 정상 생성 여부 체크
+### **설정은 config-repo/application-local.yml 기준입니다.
+### =========================================
+
+### ============== Keycloak 어드민 콘솔 확인 방법 =================
+### 1. http://localhost:8180 접속 (infra의 docker - keyclock 컨테이너 띄워져있는지 확인)
+### 2. admin/admin 으로 로그인
+### 3. 좌상단 Keycloak 드롭박스 기본 master >> first-ticket으로 변경 (realm 변경)
+### 4. 좌측 Clients 탭 이동 > 클라이언트 리스트에서 user-client 클릭
+### 5. 중간 Credentials 탭 확인 > Client Secret 'local-user-client-secret' 인지 체크 (로컬 환경 테스트 시크릿값)
+### 6. 테스트 계정 3개 정상 생성 여부 확인
+
+### --계정 Role 확인 방법--
+### 1. DB - users 테이블에서 role값 체크
+### 2. Keycloak - 좌측 Users - 사용자 선택 - Role mapping 탭에서 Name 'ROLE' 확인
+### ===============================================================
+
+### ============= Redis 키 확인 방법 =================
+### 1. 터미널에서 docker exec -it first-ticket-redis redis-cli 로 redis cli 접속
+### 2. KEYS * >> 생성된 키 확인
+### 3. GET {Key 이름} >> 생성된 키의 value 조회
+### 4. 특정 키의 남은 만료시간 확인 (초단위) : TTL {Key}
+
+### ================================================
+
+### ============================
+### 테스트 계정
+### CUSTOMER / HOST / ADMIN 테스트 계정을 app 실행 시기에 자동 생성합니다.
+### infrastructure/init/LocalDataInitializer 참고 (db/keyclock 초기화 후 생성)
+### ID / PW
+### customer@first-ticket.com / Customer1234!
+### host@first-ticket.com / Host1234!
+### admin@first-ticket.com / Admin1234!
+### ============================
+
+### ============================
+### Auth API
+### ============================
+
+### 회원가입
+POST {{baseUrl}}/api/v1/auth/signup
+Content-Type: application/json
+
+{
+    "email": "test001@example.com",
+    "password": "password123!",
+    "username": "테스트유저"
+}
+
+### 로그인 (일반사용자)
+# @name login
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+    "email": "test001@example.com",
+    "password": "password123!"
+}
+
+> {%
+client.global.set("accessToken", response.body.data.accessToken);
+client.global.set("refreshToken", response.body.data.refreshToken);
+%}
+
+### 로그인 (ADMIN 테스트 계정)
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@first-ticket.com",
+  "password": "Admin1234!"
+}
+
+> {%
+  client.global.set("adminAccessToken", response.body.data.accessToken);
+%}
+
+### 토큰 재발급
+POST {{baseUrl}}/api/v1/auth/token/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### 로그아웃
+POST {{baseUrl}}/api/v1/auth/logout
+Authorization: Bearer {{accessToken}}
+
+### ============================
+### User API (본인)
+### ============================
+
+### 내 정보 조회
+GET {{baseUrl}}/api/v1/users/me
+Authorization: Bearer {{accessToken}}
+
+### 내 정보 수정
+PATCH {{baseUrl}}/api/v1/users/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+    "username": "수정된이름"
+}
+
+### 회원 탈퇴
+DELETE {{baseUrl}}/api/v1/users/me
+Authorization: Bearer {{accessToken}}
+
+### HOST 권한 신청
+POST {{baseUrl}}/api/v1/users/me/host-requests
+Authorization: Bearer {{accessToken}}
+
+### ============================
+### Admin API
+### ============================
+
+### 사용자 목록 조회
+GET {{baseUrl}}/api/v1/admin/users
+Authorization: Bearer {{adminAccessToken}}
+
+### 사용자 목록 검색 (이메일/이름/상태/역할)
+### 조건 삽입은 Path Variable로 가능
+GET {{baseUrl}}/api/v1/admin/users?email=admin&status=ACTIVE&page=0&size=10
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+### 사용자 단건 조회
+### {userId}부분을 원하는 id로 교체
+GET {{baseUrl}}/api/v1/admin/users/{userId}
+Authorization: Bearer {{adminAccessToken}}
+
+### 사용자 탈퇴 처리 (ADMIN)
+DELETE {{baseUrl}}/api/v1/admin/users/{userId}
+Authorization: Bearer {{adminAccessToken}}
+
+### 사용자 권한 변경
+PATCH {{baseUrl}}/api/v1/users/{userId}/role
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+{
+    "role": "HOST"
+}
+
+### HOST 승인 요청 목록 조회
+GET {{baseUrl}}/api/v1/admin/host-requests?page=0&size=10
+Authorization: Bearer {{adminAccessToken}}
+
+### HOST 승인
+PATCH {{baseUrl}}/api/v1/admin/host-requests/{requestId}
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+{
+    "action": "APPROVE"
+}
+
+### HOST 거절
+PATCH {{baseUrl}}/api/v1/admin/host-requests/{requestId}
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+{
+    "action": "REJECT"
+}

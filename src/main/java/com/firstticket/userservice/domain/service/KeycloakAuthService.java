@@ -61,4 +61,14 @@ public interface KeycloakAuthService {
      * - DB changeRole과 동일한 트랜잭션 내에서 호출되므로 실패 시 DB도 롤백됩니다.
      */
     void changeUserRole(String keycloakId, String oldRoleName, String newRoleName);
+
+    /**
+     * Keycloak 사용자 계정을 완전히 삭제합니다. (로컬 테스트시 초기화 전용)
+     *
+     * 설계 결정 사항
+     * - disableUser()는 비활성화만 시키므로 동일 이메일로 재가입이 불가합니다.
+     * - 로컬 환경 초기화 시에는 Keycloak 사용자를 완전 삭제해야 테스트 계정 생성 api 재실행이 가능합니다.
+     * - 운영 환경에서는 이 메서드를 호출하지 않습니다. (@Profile("local") 컴포넌트 전용)
+     */
+    void deleteUser(String keycloakId);
 }

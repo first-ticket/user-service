@@ -410,4 +410,26 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
         log.info("[Keycloak] 역할 변경 완료 - keycloakId: {}, {} → {}", keycloakId, oldRoleName, newRoleName);
     }
 
+    @Override
+    public void deleteUser(String keycloakId) {
+        try {
+            // Keycloak Admin Client로 사용자 완전 삭제
+            keycloakAdminClient
+                .realm(keycloakProperties.realm())
+                .users()
+                .get(keycloakId)
+                .remove();
+            log.info("[deleteUser] Keycloak 사용자 삭제 완료 - keycloakId: {}", mask(keycloakId));
+        } catch (Exception e) {
+            // 이미 삭제된 사용자거나 존재하지 않는 경우 → 초기화 중이므로 경고만 기록하고 계속 진행
+            log.warn("[deleteUser] Keycloak 사용자 삭제 실패 (무시) - keycloakId: {}, message: {}",
+                mask(keycloakId), e.getMessage());
+        }
+    }
+
+    private static String mask(String uuid) {
+        if (uuid == null) return "null";
+        return uuid.toString().substring(0, 8) + "-****-****-****-************";
+    }
+
 }

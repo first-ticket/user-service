@@ -48,7 +48,7 @@
 ### ============================
 ### 테스트 계정
 ### CUSTOMER / HOST / ADMIN 테스트 계정을 app 실행 시기에 자동 생성합니다.
-### infrastructure/init/LocalDataInitializer 참고 (db/keyclock 초기화 후 생성)
+### infrastructure/init/LocalDataInitializer 참고 (db/keycloak 초기화 후 생성)
 ### ID / PW
 ### customer@first-ticket.com / Customer1234!
 ### host@first-ticket.com / Host1234!
@@ -143,7 +143,7 @@ GET {{baseUrl}}/api/v1/admin/users
 Authorization: Bearer {{adminAccessToken}}
 
 ### 사용자 목록 검색 (이메일/이름/상태/역할)
-### 조건 삽입은 Path Variable로 가능
+### 조건 삽입은 Query Parameter로 가능
 GET {{baseUrl}}/api/v1/admin/users?email=admin&status=ACTIVE&page=0&size=10
 Authorization: Bearer {{adminAccessToken}}
 Content-Type: application/json

@@ -3,8 +3,8 @@
 ### 1. infra docker 실행 (postgres, keycloak, kafka, redis)
 ### 2. eureka server 실행 (port:8761)
 ### 3. gateway server 실행 (port:8080)
-### 4. config server 실행 (port:8888)
-### 5. user-service 실행 (port:8081) - .env 추가했는지 필히 확인! (팀노션 참고)
+### 4. config server 실행 (port:8888) - Active Profile (local) 설정
+### 5. user-service 실행 (port:8081) - .env 추가했는지 필히 확인! (팀노션 참고) - Active Profile (local)
 ### 6. 상단 Run with:  local
 ### 7. 하나씩 테스트해보기
 ### 8. admin 전용 요청은 admin 계정으로 로그인해서 adminAccessToken 변수를 등록해야 합니다.

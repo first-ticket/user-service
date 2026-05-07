@@ -1,0 +1,37 @@
+# user-service CI workflow
+# 트리거: main·dev 브랜치 push 또는 PR 오픈/업데이트 시 자동 실행
+# 목적: 테스트 → REST Docs 생성 → JAR 패키징까지 CI 파이프라인 검증
+
+name: CI
+
+on:
+  push:
+    branches: [ main, dev ]       # main·dev 직접 push 시 실행
+  pull_request:
+    branches: [ main, dev ]       # main·dev 대상 PR 시 실행
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      # GitHub Packages 인증 정보 - common모듈 사용에 필요
+      # Repository Secrets에 GH_USER, GH_TOKEN 등록 필요
+      GITHUB_USER: ${{ secrets.GH_USER }}
+      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 테스트 → REST Docs 스니펫 생성 → AsciiDoc 빌드 → bootJar 패키징
+      - name: Build (test → asciidoctor → bootJar)
+        run: ./gradlew test asciidoctor bootJar

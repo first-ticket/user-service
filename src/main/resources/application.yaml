@@ -8,7 +8,9 @@ spring:
     active: local  # 기본 프로파일 (IDE에서 별도 지정 없을 때 로컬로 실행)
 
   config:
-    import: "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"  # Config Server 주소
+    import:
+      - "optional:file:.env[.properties]"
+      - "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"  # Config Server 주소
 
   cloud:
     config:

@@ -9,10 +9,23 @@ spring:
 
   config:
     import:
-      - "optional:file:.env[.properties]"
-      - "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"  # Config Server 주소
+      # 프로젝트 루트의 .env 파일에서 환경변수 로드 (IntelliJ 구성편집 불필요)
+      - "optional:file:.env[.properties]"                    # Working Dir = user-service/  일 때
+      - "optional:configserver:"             # URL 없이 Eureka 디스커버리로 Config Server 탐색
 
   cloud:
     config:
-      username: ${CONFIG_SERVER_USERNAME:admin}  # Config Server Basic Auth
-      password: ${CONFIG_SERVER_PASSWORD:admin}
+      username: ${CONFIG_SERVER_USERNAME}  # Config Server Basic Auth
+      password: ${CONFIG_SERVER_PASSWORD}
+      discovery:
+        enabled: true
+        service-id: config-server
+
+eureka:
+  instance:
+    prefer-ip-address: true
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+    service-url:
+      defaultZone: http://${EUREKA_SERVER_URL:localhost}:8761/eureka/

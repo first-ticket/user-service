@@ -120,7 +120,10 @@ dependencies {
 
 	// ===== Monitoring =====
 	// 운영환경에서 Prometheus가 /actuactor/prometheus 엔드포인트로 Metrics 수집
-	implementation 'io.micrometer:micrometer-registry-prometheus'
+    // zipkin 추가
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    runtimeOnly 'io.zipkin.reporter2:zipkin-reporter-brave'
 
 	// ===== Lombok =====
 	compileOnly 'org.projectlombok:lombok'

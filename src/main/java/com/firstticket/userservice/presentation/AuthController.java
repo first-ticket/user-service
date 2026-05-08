@@ -2,6 +2,7 @@ package com.firstticket.userservice.presentation;
 
 import com.firstticket.common.response.ApiResponse;
 import com.firstticket.userservice.application.UserCommandService;
+import com.firstticket.userservice.application.dto.command.LogoutCommand;
 import com.firstticket.userservice.application.dto.result.TokenResult;
 import com.firstticket.userservice.application.dto.result.UserResult;
 import com.firstticket.userservice.presentation.dto.request.LoginRequest;
@@ -79,7 +80,9 @@ public class AuthController {
      * 로그아웃 API
      * Gateway에서 주입한 X-User-Id 헤더(keycloakId)를 사용하여 Redis의 Refresh Token을 삭제합니다.
      *
-     * @param keycloakId Gateway AuthorizationHeaderFilter가 JWT sub 클레임에서 추출하여 주입
+     * @param keycloakId  X-User-Id  — JWT sub 클레임 (Gateway 주입)
+     * @param jti         X-Jti      — JWT jti 클레임 (Gateway 주입) → blacklist key
+     * @param tokenExpEpoch X-Token-Exp — JWT exp 클레임 epoch 초 (Gateway 주입) → Redis TTL 계산용
      * @return 204 No Content
      *
      * 오류 응답:
@@ -91,11 +94,13 @@ public class AuthController {
      */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
-        @RequestHeader("X-User-Id") String keycloakId) {
+        @RequestHeader("X-User-Id") String keycloakId,
+        @RequestHeader("X-Jti") String jti,
+        @RequestHeader("X-Token-Exp") long tokenExpEpoch
+    ) {
+        userCommandService.logout(new LogoutCommand(keycloakId, jti, tokenExpEpoch));
 
-        userCommandService.logout(keycloakId);
-
-        // 204 No Content — 응답 body 없음 (RESTful 관례: 삭제/무효화 성공 시 본문 생략)
+        // 204 No Content - 로그아웃 성공, 응답 body 없음
         return ResponseEntity.noContent().build();
     }
 

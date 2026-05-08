@@ -2,6 +2,7 @@ package com.firstticket.userservice.application;
 
 import com.firstticket.userservice.application.dto.command.ChangePasswordCommand;
 import com.firstticket.userservice.application.dto.command.LoginCommand;
+import com.firstticket.userservice.application.dto.command.LogoutCommand;
 import com.firstticket.userservice.application.dto.command.RefreshTokenCommand;
 import com.firstticket.userservice.application.dto.command.SignupCommand;
 import com.firstticket.userservice.application.dto.command.UpdateProfileCommand;
@@ -13,6 +14,7 @@ import com.firstticket.userservice.domain.UserRole;
 import com.firstticket.userservice.domain.UserRepository;
 import com.firstticket.userservice.domain.exception.UserErrorCode;
 import com.firstticket.userservice.domain.exception.UserException;
+import com.firstticket.userservice.domain.service.AccessTokenBlacklist;
 import com.firstticket.userservice.domain.service.KeycloakAuthService;
 import com.firstticket.userservice.domain.service.RefreshTokenStore;
 import com.firstticket.userservice.domain.service.RefreshTokenStore.RotateResult;
@@ -24,15 +26,16 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 
 import org.mockito.InOrder;
+
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -62,6 +65,9 @@ class UserCommandServiceTest {
 
     @Mock
     private RefreshTokenStore refreshTokenStore;
+
+    @Mock
+    private AccessTokenBlacklist accessTokenBlacklist;
 
     // keycloakId는 Keycloak이 발급하는 UUID 문자열
     private final String KEYCLOAK_ID = UUID.randomUUID().toString();
@@ -202,31 +208,46 @@ class UserCommandServiceTest {
     @DisplayName("로그아웃(logout)")
     class Logout {
 
+        // 테스트용 jti — Keycloak이 발급하는 JWT ID 클레임 형태(UUID)
+        private static final String JTI = UUID.randomUUID().toString();
+
+        // 테스트용 tokenExpEpoch — 현재로부터 15분 후 (Access Token 기본 TTL)
+        // static 필드로 선언하면 클래스 로딩 시점에 1회만 계산되어 일관성 보장
+        private static final long FUTURE_EXP = Instant.now().plusSeconds(900).getEpochSecond();
+
         @Test
-        @DisplayName("정상 로그아웃 시 Redis Refresh Token이 삭제된다")
+        @DisplayName("정상 로그아웃 시 Refresh Token이 삭제되고 Access Token이 blacklist에 등록된다")
         void 정상_로그아웃() {
             // given
             User user = activeUser();
+            LogoutCommand command = new LogoutCommand(KEYCLOAK_ID, JTI, FUTURE_EXP);
             when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
 
             // when
-            userCommandService.logout(KEYCLOAK_ID);
+            userCommandService.logout(command);
 
-            // then - Redis 토큰 삭제 1회 호출 검증
-            verify(refreshTokenStore).delete(any());
+            // then — Refresh Token 삭제 + Access Token blacklist 등록 순서로 검증
+            InOrder inOrder = inOrder(refreshTokenStore, accessTokenBlacklist);
+            inOrder.verify(refreshTokenStore).delete(any());           // Refresh Token 삭제
+            inOrder.verify(accessTokenBlacklist).add(anyString(), anyLong()); // blacklist 등록
         }
 
         @Test
-        @DisplayName("존재하지 않는 사용자 로그아웃 시 USER_NOT_FOUND 예외가 발생한다")
+        @DisplayName("존재하지 않는 사용자 로그아웃 시 USER_NOT_FOUND 예외가 발생하고 blacklist 등록이 호출되지 않는다")
         void 사용자_없음_예외() {
             // given
+            LogoutCommand command = new LogoutCommand(KEYCLOAK_ID, JTI, FUTURE_EXP);
             when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
 
             // when & then
-            assertThatThrownBy(() -> userCommandService.logout(KEYCLOAK_ID))
+            assertThatThrownBy(() -> userCommandService.logout(command))
                 .isInstanceOf(UserException.class)
                 .extracting("errorCode")
                 .isEqualTo(UserErrorCode.USER_NOT_FOUND);
+
+            // 사용자가 없으면 Redis 작업이 일어나서는 안 됨
+            verify(refreshTokenStore, never()).delete(any());
+            verify(accessTokenBlacklist, never()).add(anyString(), anyLong());
         }
     }
 

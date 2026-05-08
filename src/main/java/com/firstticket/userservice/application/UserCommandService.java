@@ -1,11 +1,13 @@
 package com.firstticket.userservice.application;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 import com.firstticket.userservice.application.dto.command.ChangePasswordCommand;
 import com.firstticket.userservice.application.dto.command.LoginCommand;
+import com.firstticket.userservice.application.dto.command.LogoutCommand;
 import com.firstticket.userservice.application.dto.command.RefreshTokenCommand;
 import com.firstticket.userservice.application.dto.command.SignupCommand;
 import com.firstticket.userservice.application.dto.command.UpdateProfileCommand;
@@ -19,6 +21,7 @@ import com.firstticket.userservice.domain.UserRole;
 import com.firstticket.userservice.domain.UserStatus;
 import com.firstticket.userservice.domain.exception.UserErrorCode;
 import com.firstticket.userservice.domain.exception.UserException;
+import com.firstticket.userservice.domain.service.AccessTokenBlacklist;
 import com.firstticket.userservice.domain.service.KeycloakAuthService;
 import com.firstticket.userservice.domain.service.RefreshTokenStore;
 import com.firstticket.userservice.domain.service.RefreshTokenStore.RotateResult; // ← 추가
@@ -44,6 +47,7 @@ public class UserCommandService {
     private final UserRepository userRepository;
     private final KeycloakAuthService keycloakAuthService;
     private final RefreshTokenStore refreshTokenStore;
+    private final AccessTokenBlacklist accessTokenBlacklist;
 
     /**
      * 회원가입
@@ -196,25 +200,34 @@ public class UserCommandService {
     /**
      * 로그아웃
      * 처리 흐름
-     * 1. Gateway X-User-Id 헤더(keycloakId)로 사용자 조회
-     * 2. Redis에서 Refresh Token 삭제 (이후 토큰 재발급 불가)
+     * 1. Gateway X-User-Id(keycloakId)로 사용자 조회
+     * 2. Redis에서 Refresh Token 삭제 → 재발급 경로 차단
+     * 3. Access Token을 blacklist에 등록 -> 잔여 TTL 동안 즉시 무효화
      *
      * 설계 결정 사항
-     * - Access Token은 만료될 때까지 유효하지만 TTL이 짧으므로(통상 5~15분) 허용 범위로 간주
-     * - Keycloak 세션 revoke는 MVP 범위 외 (추후 /logout 엔드포인트 호출로 보완 가능)
+     * - jti와 tokenExpEpoch는 Gateway AuthorizationHeaderFilter가 JWT에서 추출해 헤더로 주입
+     *   user-service는 JWT 파싱 없이 헤더 값만 사용 (관심사 분리)
+     * - tokenExpEpoch - now <= 0이면 이미 만료된 토큰 → blacklist 저장 생략 (AccessTokenBlacklistImpl 내부 처리)
+     * - blacklist 조회는 Gateway가 Redis를 직접 읽으므로 서비스 간 호출 없음
      */
     @Transactional(readOnly = true)
-    public void logout(String keycloakId) {
-        // 1. keycloakId로 사용자 조회 (없으면 이미 삭제된 계정 또는 비정상 요청)
-        User user = userRepository.findByKeycloakId(keycloakId)
+    public void logout(LogoutCommand command) {
+        // 1. keycloakId로 사용자 조회
+        User user = userRepository.findByKeycloakId(command.keycloakId())
             .orElseThrow(() -> {
-                log.warn("[logout] 사용자 조회 실패 - keycloakId: {}", keycloakId);
+                log.warn("[logout] 사용자 조회 실패 - keycloakId: {}", mask(command.keycloakId()));
                 return new UserException(UserErrorCode.USER_NOT_FOUND);
             });
 
-        // 2. Redis에서 Refresh Token 삭제 → 이후 재발급 불가
+        // 2. Refresh Token 삭제 → 재발급 경로 차단
         refreshTokenStore.delete(user.getId());
-        log.info("[logout] Refresh Token 삭제 완료 - userId: {}", user.getId());
+        log.info("[logout] Refresh Token 삭제 완료 - userId: {}", mask(user.getId()));
+
+        // 3. Access Token blacklist 등록
+        // TTL = 토큰 만료 시각(epoch초) - 현재 시각(epoch초)
+        long ttlSeconds = command.tokenExpEpoch() - Instant.now().getEpochSecond();
+        accessTokenBlacklist.add(command.jti(), ttlSeconds);
+        log.info("[logout] Access Token blacklist 등록 완료 - userId: {}, ttl: {}s", mask(user.getId()), ttlSeconds);
     }
 
     /**

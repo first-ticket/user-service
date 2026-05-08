@@ -1,0 +1,58 @@
+# user-service/docker-compose.yml
+services:
+  user-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: first-ticket-user
+
+    ports:
+      - "8081:8080"
+
+    environment:
+      # 활성 프로파일 - prod로 기동
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+
+      # DB 연결 — 환경변수로 직접 주입 (Config Server 플레이스홀더 우회)
+      # Spring Boot 표준 환경변수: SPRING_DATASOURCE_URL → spring.datasource.url 자동 매핑
+      SPRING_DATASOURCE_URL: jdbc:postgresql://first-ticket-postgres:5432/first_ticket
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-eureka-server}
+      CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
+      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      ZIPKIN_ENDPOINT: ${ZIPKIN_ENDPOINT:-http://zipkin:9411/api/v2/spans}
+
+      # Keycloak (user-service-prod.yml 플레이스홀더 해결용)
+      KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_URL}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+
+      # DB정보
+      DB_HOST: first-ticket-postgres
+      DB_USERNAME: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+      # GITHUB_USER / GITHUB_TOKEN은 환경변수에 포함하지 않음
+      # 이유: user-service Dockerfile은 사전 빌드 방식
+      # GitHub Packages 인증은 ./gradlew bootJar 시점에만 필요하고
+      # 컨테이너 런타임에는 불필요합니다.
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+    restart: unless-stopped
+
+    networks:
+      - first-ticket-network
+
+networks:
+  first-ticket-network:
+    external: true
+    name: first-ticket-network

@@ -9,6 +9,7 @@ import static org.springframework.restdocs.operation.preprocess.Preprocessors.*;
 import static org.springframework.restdocs.payload.PayloadDocumentation.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
@@ -251,24 +252,38 @@ class AuthControllerTest {
     @DisplayName("POST /api/v1/auth/logout — 로그아웃")
     class Logout {
 
+        // Gateway AuthorizationHeaderFilter가 JWT에서 추출해 주입하는 헤더 테스트 픽스처
+        private static final String TEST_JTI       = UUID.randomUUID().toString();
+        private static final String TEST_TOKEN_EXP =
+            String.valueOf(Instant.now().plusSeconds(900).getEpochSecond());
+
         @Test
-        @DisplayName("X-User-Id 헤더가 있으면 Redis Refresh Token을 삭제하고 204 No Content를 반환한다")
+        @DisplayName("필수 헤더가 모두 있으면 Refresh Token 삭제 + Access Token blacklist 등록 후 204를 반환한다")
         void 로그아웃_성공() throws Exception {
+            // given — userCommandService.logout()은 void, 정상 처리 모킹
             doNothing().when(userCommandService).logout(any());
             String keycloakId = UUID.randomUUID().toString();
 
+            // when & then
             mockMvc.perform(post("/api/v1/auth/logout")
-                    .header("X-User-Id", keycloakId))
-                .andExpect(status().isNoContent())
+                    // Gateway가 JWT 클레임에서 추출해 주입하는 3개 헤더
+                    .header("X-User-Id",    keycloakId)    // sub: Keycloak 사용자 UUID
+                    .header("X-Jti",        TEST_JTI)      // jti: Access Token blacklist key
+                    .header("X-Token-Exp",  TEST_TOKEN_EXP)) // exp: Redis TTL 계산용 (epoch 초)
+                .andExpect(status().isNoContent())          // 204 No Content
                 .andDo(document("auth-logout",
                     preprocessRequest(prettyPrint()),
                     preprocessResponse(prettyPrint()),
-                    requestHeaders(  // ← 기존에 빠져 있던 헤더 문서 추가
-                        headerWithName("X-User-Id").description
-                            ("Gateway가 JWT sub 클레임에서 추출하여 주입한 keycloak 사용자 ID")
-                        )
-                        // 204 No Content — 응답 body 없음
-                    ));
+                    requestHeaders(
+                        headerWithName("X-User-Id")
+                            .description("Gateway가 JWT sub 클레임에서 추출하여 주입한 Keycloak 사용자 UUID"),
+                        headerWithName("X-Jti")
+                            .description("Gateway가 JWT jti 클레임에서 추출하여 주입한 JWT 고유 ID — Access Token blacklist 키"),
+                        headerWithName("X-Token-Exp")
+                            .description("Gateway가 JWT exp 클레임에서 추출하여 주입한 만료 시각 (epoch 초) — Redis TTL 계산용")
+                    )
+                    // 204 No Content — 응답 body 없음
+                ));
         }
     }
 

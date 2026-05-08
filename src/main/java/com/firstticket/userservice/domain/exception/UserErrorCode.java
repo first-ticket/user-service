@@ -31,7 +31,11 @@ public enum UserErrorCode implements ErrorCode {
 
     // Keycloak
     ROLE_ASSIGN_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "keycloak 사용자 권한 설정에 실패했습니다."),
-    KEYCLOAK_USER_DISABLE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "Keycloak 사용자 비활성화에 실패했습니다.");
+    KEYCLOAK_USER_DISABLE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "Keycloak 사용자 비활성화에 실패했습니다."),
+    KEYCLOAK_PASSWORD_CHANGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "Keycloak 비밀번호 변경에 실패했습니다."),
+
+    // 비밀번호 변경
+    WRONG_CURRENT_PASSWORD(HttpStatus.UNPROCESSABLE_ENTITY, "현재 비밀번호가 올바르지 않습니다.");
 
     private final HttpStatus status;
     private final String message;

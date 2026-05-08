@@ -19,6 +19,7 @@ import com.firstticket.userservice.application.UserQueryService;
 import com.firstticket.userservice.application.dto.command.UpdateProfileCommand;
 import com.firstticket.userservice.application.dto.result.HostRequestResult;
 import com.firstticket.userservice.application.dto.result.UserResult;
+import com.firstticket.userservice.presentation.dto.request.ChangePasswordRequest;
 import com.firstticket.userservice.presentation.dto.request.UpdateProfileRequest;
 import com.firstticket.userservice.presentation.dto.response.HostRequestResponse;
 import com.firstticket.userservice.presentation.dto.response.UserResponse;
@@ -113,6 +114,40 @@ public class UserController {
         UUID keycloakId = AuthContext.getUserId();
         userCommandService.withdraw(keycloakId.toString());
         return ApiResponse.success(UserSuccessCode.WITHDRAW_SUCCESS);
+    }
+
+    /**
+     * 본인 비밀번호 변경 API
+     * POST /api/v1/users/me/password
+     *
+     * Gateway의 X-User-Id 헤더(keycloakId)로 본인을 식별합니다.
+     * 현재 비밀번호 확인 후 새 비밀번호로 변경합니다.
+     *
+     * @param request currentPassword (현재 비밀번호), newPassword (새 비밀번호)
+     * @return 200 OK (비밀번호 변경 완료)
+     *
+     * 오류 응답:
+     *   400 Bad Request  — currentPassword/newPassword 빈 값 (@NotBlank 위반)
+     *   400 Bad Request  — newPassword 8자 미만 (Password VO 검증 실패)
+     *   401 Unauthorized — X-User-Id 헤더 누락 (Gateway 미인증 요청)
+     *   422 Unprocessable Entity — currentPassword 불일치 (도메인 규칙 위반, WRONG_CURRENT_PASSWORD)
+     *   404 Not Found    — 사용자 없음
+     *   410 Gone         — 이미 탈퇴된 사용자
+     *
+     * 설계 결정 사항
+     * - 추후 Notification Service 연동 시 이메일 인증 코드 검증 단계를 Service 계층에 추가합니다.
+     */
+    @PostMapping("/me/password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+        @RequestBody @Valid ChangePasswordRequest request
+    ) {
+        // AuthContext에서 Gateway가 주입한 X-User-Id(keycloakId) 추출
+        UUID keycloakId = AuthContext.getUserId();
+
+        // Application 계층에 위임: 현재 비밀번호 검증 → Keycloak 비밀번호 변경
+        userCommandService.changePassword(keycloakId.toString(), request.toCommand());
+
+        return ApiResponse.success(UserSuccessCode.PASSWORD_CHANGED);
     }
 
     /**

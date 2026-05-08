@@ -314,6 +314,50 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
     }
 
     /**
+     * Keycloak Token Revocation Endpoint 호출
+     * - 비밀번호 변경 시 현재 비밀번호 검증을 위해 발급된 고아 세션을 즉시 종료
+     */
+    @Override
+    public void revokeToken(String refreshToken) {
+        String revokeUrl = buildRevokeUrl();
+
+        MultiValueMap<String, String> formBody = new LinkedMultiValueMap<>();
+        formBody.add("token", refreshToken);
+        formBody.add("token_type_hint", "refresh_token");
+        formBody.add("client_id", keycloakProperties.clientId());
+        formBody.add("client_secret", keycloakProperties.clientSecret());
+
+        try {
+            keycloakRestClient.post()
+                .uri(revokeUrl)
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(formBody)
+                .retrieve()
+                .toBodilessEntity(); // revocation 응답은 body 없음 (200 OK만 확인)
+
+            log.debug("[Keycloak] 검증용 토큰 revoke 완료");
+
+        } catch (Exception e) {
+            // revoke 실패는 세션이 TTL까지 잔존하는 것뿐
+            // 이미 비밀번호가 변경되어 해당 세션의 토큰은 실질적으로 무효화됨
+            // 비밀번호 변경 자체를 롤백할 이유가 없으므로 경고 로그만 남김
+            log.warn("[Keycloak] 검증용 토큰 revoke 실패 (비밀번호 변경은 유지됨) - message: {}",
+                e.getMessage());
+        }
+    }
+
+    /**
+     * Keycloak Token Revocation Endpoint URL
+     */
+    private String buildRevokeUrl() {
+        return String.format(
+            "%s/realms/%s/protocol/openid-connect/revoke",
+            keycloakProperties.serverUrl(),
+            keycloakProperties.realm()
+        );
+    }
+
+    /**
      * Keycloak 사용자 계정 비활성화
      *
      * Admin Client로 UserRepresentation을 가져와 enabled = false 로 업데이트합니다.
@@ -424,6 +468,39 @@ public class KeycloakAuthServiceImpl implements KeycloakAuthService {
             // 이미 삭제된 사용자거나 존재하지 않는 경우 → 초기화 중이므로 경고만 기록하고 계속 진행
             log.warn("[deleteUser] Keycloak 사용자 삭제 실패 (무시) - keycloakId: {}, message: {}",
                 mask(keycloakId), e.getMessage());
+        }
+    }
+
+    /**
+     * Keycloak Admin Client를 통해 비밀번호를 재설정
+     *
+     * Keycloak REST API: PUT /admin/realms/{realm}/users/{id}/reset-password
+     * - CredentialRepresentation: type = "password", value = 새 비밀번호, temporary = false
+     * - temporary = false: 임시 비밀번호가 아니므로 로그인 후 강제 변경 요구 없음 (keycloak 설정)
+     */
+    @Override
+    public void changePassword(String keycloakId, String newPassword) {
+        try {
+            // 비밀번호 자격증명 객체 구성
+            CredentialRepresentation credential = new CredentialRepresentation();
+            credential.setType(CredentialRepresentation.PASSWORD); // "password" 타입 고정
+            credential.setValue(newPassword);                      // 평문 비밀번호 (Keycloak이 해싱)
+            credential.setTemporary(false);                        // 로그인 후 강제 변경 없음
+
+            // Admin Client로 비밀번호 재설정 호출
+            // resetPassword()는 성공 시 void 반환, 실패 시 예외 발생
+            keycloakAdminClient
+                .realm(keycloakProperties.realm())
+                .users()
+                .get(keycloakId)          // 대상 사용자 리소스 선택
+                .resetPassword(credential); // PUT /admin/realms/{realm}/users/{id}/reset-password
+
+            log.info("[Keycloak] 비밀번호 변경 완료 - keycloakId: {}", mask(keycloakId));
+
+        } catch (Exception e) {
+            // Keycloak Admin Client 예외를 도메인 예외로 변환 - 인프라 예외가 상위 계층에 누출되지 않도록 차단
+            log.error("[Keycloak] 비밀번호 변경 실패 - keycloakId: {}", mask(keycloakId), e);
+            throw new UserException(UserErrorCode.KEYCLOAK_PASSWORD_CHANGE_FAILED);
         }
     }
 

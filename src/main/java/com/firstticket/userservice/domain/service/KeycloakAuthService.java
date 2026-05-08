@@ -71,4 +71,29 @@ public interface KeycloakAuthService {
      * - 운영 환경에서는 이 메서드를 호출하지 않습니다. (@Profile("local") 컴포넌트 전용)
      */
     void deleteUser(String keycloakId);
+
+    /**
+     * Keycloak 사용자 비밀번호를 변경합니다.
+     *
+     * 설계 결정 사항
+     * - Keycloak Admin Client의 resetPassword() API를 사용합니다.
+     *   (POST /admin/realms/{realm}/users/{id}/reset-password)
+     *
+     * 추후 확장
+     * - Notification Service 구현 시 이메일 통한 인증 코드 검증을 호출부(Application 계층)에서
+     *   이 메서드 호출 전에 추가
+     *
+     * @param keycloakId  비밀번호를 변경할 사용자의 Keycloak UUID
+     * @param newPassword 새 비밀번호 (평문, Keycloak이 해싱 담당)
+     */
+    void changePassword(String keycloakId, String newPassword);
+
+    /**
+     * 검증 목적으로 발급된 Keycloak 세션을 즉시 revoke합니다.
+     * revoke해주지 않으면 반복 호출시 계속 세션이 쌓이는 현상 발견 > 별도 revoke 호출로 처리
+     * Token Revocation Endpoint: POST /realms/{realm}/protocol/openid-connect/revoke
+     *
+     * @param refreshToken revoke할 refresh token
+     */
+    void revokeToken(String refreshToken);
 }

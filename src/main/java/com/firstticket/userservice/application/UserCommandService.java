@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+import com.firstticket.userservice.application.dto.command.ChangePasswordCommand;
 import com.firstticket.userservice.application.dto.command.LoginCommand;
 import com.firstticket.userservice.application.dto.command.RefreshTokenCommand;
 import com.firstticket.userservice.application.dto.command.SignupCommand;
@@ -382,6 +383,79 @@ public class UserCommandService {
         refreshTokenStore.delete(user.getId());
 
         log.info("[withdraw] 회원탈퇴 완료 - userId: {}", mask(user.getId()));
+    }
+
+    /**
+     * 비밀번호 변경 (본인)
+     *
+     * 처리 흐름
+     * 1. keycloakId로 사용자 조회 (없으면 404)
+     * 2. DELETED 상태 차단 (410)
+     * 3. 새 비밀번호 형식 검증 — Password VO (8자 이상, 100자 이하)
+     * 4. 현재 비밀번호 검증 — Keycloak ROPC 로그인 시도
+     *    실패 시 WRONG_CURRENT_PASSWORD (401)
+     * 5. Keycloak Admin API로 비밀번호 변경
+     *
+     * 설계 결정 사항
+     * - 비밀번호는 Keycloak이 관리하므로 DB 변경 없음 → @Transactional(readOnly = true)
+     * - 현재 비밀번호 검증에 keycloakAuthService.login()을 재사용합니다.
+     *   별도 "비밀번호 확인" Keycloak API가 없으므로 ROPC 흐름이 가장 단순한 검증 수단입니다.
+     * - login() 성공으로 발급된 토큰은 사용하지 않고 버립니다 (검증 목적으로만 호출).
+     *
+     * 추후 확장 포인트 (Notification Service 연동 시)
+     * - 3번과 4번 사이에 이메일 인증 코드 검증 단계를 삽입합니다.
+     *   이 메서드 시그니처와 흐름 구조는 유지됩니다.
+     */
+    @Transactional(readOnly = true) // DB 쓰기 없음 - Keycloak 전용 작업
+    public void changePassword(String keycloakId, ChangePasswordCommand command) {
+        Objects.requireNonNull(keycloakId, "keycloakId는 null일 수 없습니다.");
+
+        // 1. keycloakId로 사용자 조회
+        User user = userRepository.findByKeycloakId(keycloakId)
+            .orElseThrow(() -> {
+                log.warn("[changePassword] 존재하지 않는 사용자 - keycloakId: {}", mask(keycloakId));
+                return new UserException(UserErrorCode.USER_NOT_FOUND);
+            });
+
+        // 2. 탈퇴 상태 사용자의 접근 차단
+        if (user.getStatus() == UserStatus.DELETED) {
+            log.warn("[changePassword] 탈퇴한 사용자 비밀번호 변경 시도 - userId: {}", mask(user.getId()));
+            throw new UserException(UserErrorCode.USER_ALREADY_DELETED);
+        }
+
+        // 3. 새 비밀번호 형식 검증
+        // 검증만 목적으로 생성하며 저장하지 않음 (비밀번호는 Keycloak이 관리)
+        Password.of(command.newPassword());
+
+        // TODO: verificationCodeStore.verify(user.getEmail(), command.verificationCode());
+        // 이메일 인증코드 검사 로직 위치
+
+        // 4. 현재 비밀번호 검증 - Keycloak ROPC로 실제 자격증명 확인
+        // 검증 성공 후 발급된 세션은 즉시 revoke하여 고아 세션 누적을 방지
+        try {
+            TokenResult verificationToken =
+                keycloakAuthService.login(user.getEmail(), command.currentPassword());
+            // 검증 목적으로만 사용한 세션 즉시 revoke (비밀번호 변경과 무관하게 항상 수행)
+            keycloakAuthService.revokeToken(verificationToken.refreshToken());
+        } catch (UserException e) {
+            if (e.getErrorCode() == UserErrorCode.INVALID_CREDENTIALS) {
+                log.warn("[changePassword] 현재 비밀번호 불일치 - userId: {}", mask(user.getId()));
+                throw new UserException(UserErrorCode.WRONG_CURRENT_PASSWORD);
+            }
+            log.error("[changePassword] 비밀번호 검증 중 예상치 못한 오류 - userId: {}, errorCode: {}",
+                mask(user.getId()), e.getErrorCode());
+            throw e;
+        } catch (RuntimeException e) {
+            log.error("[changePassword] 현재 비밀번호 검증 중 Keycloak 서버 오류 - userId: {}",
+                mask(user.getId()), e);
+            throw e;
+        }
+
+        // 5. Keycloak Admin API로 비밀번호 변경
+        // 실패 시 KEYCLOAK_PASSWORD_CHANGE_FAILED (500) 발생
+        keycloakAuthService.changePassword(user.getKeycloakId(), command.newPassword());
+
+        log.info("[changePassword] 비밀번호 변경 완료 - userId: {}", mask(user.getId()));
     }
 
     //UUID 마스킹

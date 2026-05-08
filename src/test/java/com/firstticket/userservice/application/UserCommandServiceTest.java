@@ -1,5 +1,6 @@
 package com.firstticket.userservice.application;
 
+import com.firstticket.userservice.application.dto.command.ChangePasswordCommand;
 import com.firstticket.userservice.application.dto.command.LoginCommand;
 import com.firstticket.userservice.application.dto.command.RefreshTokenCommand;
 import com.firstticket.userservice.application.dto.command.SignupCommand;
@@ -30,6 +31,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+
+import org.mockito.InOrder;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -456,6 +461,139 @@ class UserCommandServiceTest {
                 .isInstanceOf(UserException.class)
                 .extracting("errorCode")
                 .isEqualTo(UserErrorCode.USER_NOT_FOUND);
+        }
+    }
+
+    @Nested
+    @DisplayName("비밀번호 변경(changePassword)")
+    class ChangePassword {
+
+        // 테스트 전용 비밀번호 픽스처 (Password VO 최소 요건인 8자 이상 충족)
+        private static final String CURRENT_PW = "CurrentPass1!";
+        private static final String NEW_PW     = "NewPassword1!";
+
+        @Test
+        @DisplayName("정상 변경 시 Keycloak 현재 비밀번호 검증 후 새 비밀번호로 변경한다")
+        void 정상_비밀번호_변경() {
+            // given
+            User user = activeUser();
+            ChangePasswordCommand command = new ChangePasswordCommand(CURRENT_PW, NEW_PW);
+
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+            // login()은 현재 비밀번호 검증 목적으로 호출 - 반환된 토큰은 서비스에서 버림
+            when(keycloakAuthService.login(anyString(), anyString()))
+                .thenReturn(new TokenResult("access-token", "refresh-token"));
+
+            // when
+            userCommandService.changePassword(KEYCLOAK_ID, command);
+
+            // 현재 비밀번호 검증 후 변경 - 흐름 순서를 테스트로 명시
+            InOrder inOrder = inOrder(keycloakAuthService);
+            inOrder.verify(keycloakAuthService).login(anyString(), anyString());
+            inOrder.verify(keycloakAuthService).changePassword(KEYCLOAK_ID, NEW_PW);
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 사용자이면 USER_NOT_FOUND 예외가 발생하고 Keycloak을 호출하지 않는다")
+        void 사용자_없음_예외() {
+            // given
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+            ChangePasswordCommand command = new ChangePasswordCommand(CURRENT_PW, NEW_PW);
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.changePassword(KEYCLOAK_ID, command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_NOT_FOUND);
+
+            // 사용자가 없으면 Keycloak 호출이 일어나서는 안 됨 (불필요한 외부 호출 방지)
+            verify(keycloakAuthService, never()).login(anyString(), anyString());
+            verify(keycloakAuthService, never()).changePassword(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("DELETED 사용자이면 USER_ALREADY_DELETED 예외가 발생한다")
+        void 탈퇴된_사용자_예외() {
+            // given — softDelete() 호출로 DELETED 상태 User 생성
+            User deletedUser = activeUser();
+            deletedUser.softDelete(UUID.randomUUID());
+
+            ChangePasswordCommand command = new ChangePasswordCommand(CURRENT_PW, NEW_PW);
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(deletedUser));
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.changePassword(KEYCLOAK_ID, command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_ALREADY_DELETED);
+
+            // 탈퇴 상태 차단 이후 Keycloak 호출 없어야 함
+            verify(keycloakAuthService, never()).login(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("현재 비밀번호가 틀리면 INVALID_CREDENTIALS가 WRONG_CURRENT_PASSWORD로 변환되어 발생한다")
+        void 현재_비밀번호_불일치_예외() {
+            // given - Keycloak ROPC 로그인 실패 시나리오
+            User user = activeUser();
+            ChangePasswordCommand command = new ChangePasswordCommand("WrongPass1!", NEW_PW);
+
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+            // 현재 비밀번호 검증 실패: INVALID_CREDENTIALS → WRONG_CURRENT_PASSWORD로 래핑
+            when(keycloakAuthService.login(anyString(), anyString()))
+                .thenThrow(new UserException(UserErrorCode.INVALID_CREDENTIALS));
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.changePassword(KEYCLOAK_ID, command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.WRONG_CURRENT_PASSWORD);
+
+            // 현재 비밀번호 검증 실패 시 Keycloak 비밀번호 변경은 호출되지 않아야 함
+            verify(keycloakAuthService, never()).changePassword(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("Keycloak 비밀번호 변경 API가 실패하면 KEYCLOAK_PASSWORD_CHANGE_FAILED 예외가 발생한다")
+        void Keycloak_변경_실패_예외() {
+            // given - 현재 비밀번호 검증은 성공, 변경 API에서 장애 발생 시나리오
+            User user = activeUser();
+            ChangePasswordCommand command = new ChangePasswordCommand(CURRENT_PW, NEW_PW);
+
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+            when(keycloakAuthService.login(anyString(), anyString()))
+                .thenReturn(new TokenResult("access-token", "refresh-token"));
+            // Keycloak Admin API 호출 실패 — Infrastructure 계층에서 이미 래핑된 예외 전파
+            doThrow(new UserException(UserErrorCode.KEYCLOAK_PASSWORD_CHANGE_FAILED))
+                .when(keycloakAuthService).changePassword(anyString(), anyString());
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.changePassword(KEYCLOAK_ID, command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.KEYCLOAK_PASSWORD_CHANGE_FAILED);
+        }
+
+        @Test
+        @DisplayName("새 비밀번호가 8자 미만이면 INVALID_PASSWORD_FORMAT 예외가 발생하고 Keycloak을 호출하지 않는다")
+        void 새_비밀번호_형식_불량_예외() {
+            // given
+            // @NotBlank(Presentation 계층)는 통과하지만 Password VO 최소 길이(8자)를 위반하는 값
+            // 서비스 3단계: Password.of(command.newPassword()) 에서 INVALID_PASSWORD_FORMAT 발생
+            User user = activeUser();
+            ChangePasswordCommand command = new ChangePasswordCommand(CURRENT_PW, "Short1!"); // 7자
+
+            when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+
+            // when & then
+            assertThatThrownBy(() -> userCommandService.changePassword(KEYCLOAK_ID, command))
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.INVALID_PASSWORD_FORMAT);
+
+            // 형식 검증(3단계) 실패 → 현재 비밀번호 검증(4단계)과 Keycloak 변경(5단계) 모두 호출 금지
+            verify(keycloakAuthService, never()).login(anyString(), anyString());
+            verify(keycloakAuthService, never()).changePassword(anyString(), anyString());
         }
     }
 }

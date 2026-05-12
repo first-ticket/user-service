@@ -125,6 +125,9 @@ dependencies {
     implementation 'io.micrometer:micrometer-tracing-bridge-brave'
     runtimeOnly 'io.zipkin.reporter2:zipkin-reporter-brave'
 
+    // Keycloak RestClient 커넥션 풀 튜닝용
+    implementation 'org.apache.httpcomponents.client5:httpclient5'
+
 	// ===== Lombok =====
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'

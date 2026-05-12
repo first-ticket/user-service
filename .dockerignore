@@ -9,12 +9,19 @@ build/test-results/
 .env
 *.env
 .gradle/
-gradle/
 
 # IDE / OS 메타데이터
 .idea/
 *.iml
 .DS_Store
 
-# 소스코드 (런타임에 불필요)
-src/
+# Gradle 캐시 및 빌드 결과물
+build/
+
+# Git 메타데이터
+.git/
+.gitignore
+
+# 문서 / 기타
+*.md
+http/

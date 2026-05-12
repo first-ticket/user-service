@@ -4,6 +4,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.IntStream;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.firstticket.userservice.application.dto.command.ChangePasswordCommand;
 import com.firstticket.userservice.application.dto.command.LoginCommand;
@@ -24,13 +28,10 @@ import com.firstticket.userservice.domain.exception.UserException;
 import com.firstticket.userservice.domain.service.AccessTokenBlacklist;
 import com.firstticket.userservice.domain.service.KeycloakAuthService;
 import com.firstticket.userservice.domain.service.RefreshTokenStore;
-import com.firstticket.userservice.domain.service.RefreshTokenStore.RotateResult; // ← 추가
+import com.firstticket.userservice.domain.service.RefreshTokenStore.RotateResult;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 설계 결정 사항
@@ -146,6 +147,34 @@ public class UserCommandService {
                 log.info("[seed] 테스트 계정 생성 완료 - email: {}, role: {}", spec.email(), spec.role());
                 return UserResult.from(saved);
             });
+    }
+
+    /**
+     * 부하테스트 전용 테스트 계정 시드 메서드
+     * @Profile("load-test")에서만 호출됩니다.
+     *
+     * 설계 결정 사항
+     * - 25명 모두 CUSTOMER role: 부하테스트 시나리오(로그인)는 역할 구분이 불필요
+     * - IntStream으로 동적 생성: 계정 수 변경 시 상수만 수정하면 됨
+     * - 이메일 패턴: testuser01~25@test.com (zero-padded → 정렬/가독성)
+     * - 비밀번호 Test1234!: Password VO 검증 통과 조건(대소문자+숫자+특수문자)
+     */
+    @Transactional
+    public List<UserResult> seedLoadTestUsers() {
+        // 25명의 CUSTOMER 계정 명세를 동적 생성 (상수만 바꾸면 vuser 수 조정 가능)
+        int userCount = 200;
+        List<SeedUserSpec> specs = IntStream.rangeClosed(1, userCount)
+            .mapToObj(i -> new SeedUserSpec(
+                String.format("testuser%02d@test.com", i),
+                "Test1234!",
+                String.format("테스트유저%02d", i),
+                UserRole.CUSTOMER
+            ))
+            .toList();
+
+        return specs.stream()
+            .map(this::createOrGetSeedUser) // 기존 멱등성 로직 재사용
+            .toList();
     }
 
     /**

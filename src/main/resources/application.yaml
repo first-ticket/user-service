@@ -14,12 +14,26 @@ spring:
       - "optional:configserver:"             # URL 없이 Eureka 디스커버리로 Config Server 탐색
 
   cloud:
+    # ECS Fargate에서 Eureka에 자기 IP를 ECS 메타데이터 IP(169.254.172.2)가 아닌 VPC 내부 IP(172.31.x.x)로 등록되게 하기 위한 설정.
+    # InetUtils가 IP 선택 시점이 Config Server 받기 전이라
+    inetutils:
+      preferred-networks:
+        - 10\.
+        - 172\.
+        - 192\.168\.
+        -
     config:
       username: ${CONFIG_SERVER_USERNAME}  # Config Server Basic Auth
       password: ${CONFIG_SERVER_PASSWORD}
       discovery:
         enabled: true
         service-id: config-server
+      fail-fast: true # Config Server 연결 실패시 즉시 종료 (무한 대기 방지)
+      retry: # 연결 재시도 설정 (기동 초기 레이스 컨디션 대응)
+        max-attempts: 20
+        initial-interval: 2000
+        max-interval: 5000
+        multiplier: 1.2
 
 eureka:
   instance:

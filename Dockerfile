@@ -1,4 +1,5 @@
 # user-service 배포용 Dockerfile
+# Stage 1: 빌드
 FROM eclipse-temurin:21-jdk-alpine AS builder
 
 WORKDIR /workspace
@@ -8,17 +9,18 @@ COPY gradle/ gradle/
 RUN chmod +x gradlew
 
 COPY build.gradle settings.gradle ./
-
 COPY src/ src/
 
 ARG GITHUB_USER
-ARG GITHUB_TOKEN
 
-RUN GITHUB_USER=${GITHUB_USER} GITHUB_TOKEN=${GITHUB_TOKEN} \
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token)" \
+    GITHUB_USER=$GITHUB_USER \
     ./gradlew bootJar -x test -x asciidoctor --no-daemon
+
+# Stage 2: 런타임 (JRE만 포함한 경량 이미지)
 FROM eclipse-temurin:21-jre-alpine
 
-# 보안 강화 - 전용 비루트 사용자 생성
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app

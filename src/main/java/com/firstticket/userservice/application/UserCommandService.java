@@ -3,6 +3,7 @@ package com.firstticket.userservice.application;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -30,6 +31,8 @@ import com.firstticket.userservice.domain.service.KeycloakAuthService;
 import com.firstticket.userservice.domain.service.RefreshTokenStore;
 import com.firstticket.userservice.domain.service.RefreshTokenStore.RotateResult;
 
+import com.firstticket.userservice.domain.service.AccessTokenCache;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -49,6 +52,7 @@ public class UserCommandService {
     private final KeycloakAuthService keycloakAuthService;
     private final RefreshTokenStore refreshTokenStore;
     private final AccessTokenBlacklist accessTokenBlacklist;
+    private final AccessTokenCache accessTokenCache;
 
     /**
      * 회원가입
@@ -196,9 +200,17 @@ public class UserCommandService {
      * 처리 흐름
      * 1. 이메일로 DB에서 사용자 조회 (없으면 401)
      * 2. 계정 상태 검증 — ACTIVE 이외에는 로그인 거부
-     * 3. Keycloak ROPC 호출 → Access Token + Refresh Token 발급
-     * 4. Refresh Token Redis 저장
-     * 5. TokenResult 반환
+     * 3. AT 캐시 조회 → 히트 시 RefreshTokenStore에서 현재 RT를 조합하여 즉시 반환 (Keycloak 생략)
+     * 4. (캐시 미스) Keycloak ROPC 호출 → Access Token + Refresh Token 발급
+     * 5. Refresh Token Redis 저장
+     * 6. Access Token 캐시 저장 (TTL은 JWT exp 기반으로 구현체가 계산)
+     * 7. TokenResult 반환
+     *
+     * 설계 결정 사항
+     * - AT 캐시에는 Access Token 문자열만 저장합니다. RT는 RefreshTokenStore가 Source of Truth
+     *   Token Rotation 이후에도 RefreshTokenStore는 항상 최신 RT를 보유하므로 stale RT 반환 불가
+     * - 캐시 히트 시 RT가 없는 경우(세션 만료/비정상 상태): AT 캐시를 삭제하고 Keycloak 경로로 폴백
+     *   이론상 AT TTL(30분) < RT TTL(7일)이므로 정상 운영에서는 발생하지 않음
      */
     @Transactional(readOnly = true)
     public TokenResult login(LoginCommand command) {
@@ -216,13 +228,35 @@ public class UserCommandService {
             throw new UserException(UserErrorCode.INVALID_CREDENTIALS);
         }
 
-        // 3. Keycloak Token Endpoint 호출
+        // 3. AT 캐시 조회 - 동일 사용자의 재로그인 시 Keycloak ROPC 호출 생략 (성능 개선 핵심)
+        Optional<String> cachedAt = accessTokenCache.find(command.email());
+        if (cachedAt.isPresent()) {
+            // AT 캐시 hit: RefreshTokenStore에서 현재 RT를 조합하여 반환
+            // RefreshTokenStore는 Token Rotation을 통해 항상 최신 RT를 유지합니다.
+            Optional<String> currentRt = refreshTokenStore.find(user.getId());
+            if (currentRt.isPresent()) {
+                // AT(캐시) + RT(최신) 조합 반환 — Keycloak 호출 없음 (~5ms)
+                log.info("[login] AT 캐시 히트 - Keycloak 호출 생략, userId: {}", mask(user.getId()));
+                return new TokenResult(cachedAt.get(), currentRt.get());
+            }
+            // RT가 없는 비정상 상태: stale 캐시 제거 후 Keycloak 경로로 폴백
+            // (AT TTL=30분 < RT TTL=7일 이므로 정상 운영에서는 발생하지 않는 방어 코드)
+            log.info("[login] AT 캐시 히트이나 RT 없음 — 캐시 무효화 후 Keycloak 재호출, userId: {}",
+                mask(user.getId()));
+            accessTokenCache.delete(command.email());
+        }
+
+        // 4. 캐시 miss - 기존과 동일하게 Keycloak Token Endpoint 호출
         TokenResult tokenResult = keycloakAuthService.login(command.email(), command.password());
 
-        // 4. Refresh Token Redis 저장
+        // 5. Refresh Token Redis 저장
         refreshTokenStore.save(user.getId(), tokenResult.refreshToken());
 
-        // 5. AccessToken, RefreshToken 반환
+        // 6. Access Token 캐시 저장
+        accessTokenCache.save(command.email(), tokenResult.accessToken());
+
+        log.info("[login] 캐시 미스 - Keycloak 호출 후 캐시 저장, userId: {}", mask(user.getId()));
+        // 7. AT + RT 반환
         return tokenResult;
     }
 
@@ -231,32 +265,38 @@ public class UserCommandService {
      * 처리 흐름
      * 1. Gateway X-User-Id(keycloakId)로 사용자 조회
      * 2. Redis에서 Refresh Token 삭제 → 재발급 경로 차단
-     * 3. Access Token을 blacklist에 등록 -> 잔여 TTL 동안 즉시 무효화
+     * 3. Access Token을 blacklist에 등록 → 잔여 TTL 동안 즉시 무효화
+     * 4. AT 캐시 무효화 → 로그아웃 후 stale 토큰이 재반환되는 경로 차단
      *
      * 설계 결정 사항
-     * - jti와 tokenExpEpoch는 Gateway AuthorizationHeaderFilter가 JWT에서 추출해 헤더로 주입
+     * - jti 및 tokenExpEpoch는 Gateway AuthorizationHeaderFilter가 JWT에서 추출해 헤더로 주입
      *   user-service는 JWT 파싱 없이 헤더 값만 사용 (관심사 분리)
      * - tokenExpEpoch - now <= 0이면 이미 만료된 토큰 → blacklist 저장 생략 (AccessTokenBlacklistImpl 내부 처리)
      * - blacklist 조회는 Gateway가 Redis를 직접 읽으므로 서비스 간 호출 없음
+     * - AT 캐시 무효화는 blacklist 등록과 함께 이중으로 수행 → 재로그인 시 stale 토큰 반환 방지
      */
     @Transactional(readOnly = true)
     public void logout(LogoutCommand command) {
-        // 1. keycloakId로 사용자 조회
+        // 1. user.keycloakId로 사용자 조회
         User user = userRepository.findByKeycloakId(command.keycloakId())
             .orElseThrow(() -> {
                 log.warn("[logout] 사용자 조회 실패 - keycloakId: {}", mask(command.keycloakId()));
                 return new UserException(UserErrorCode.USER_NOT_FOUND);
             });
 
-        // 2. Refresh Token 삭제 → 재발급 경로 차단
+        // 2. Refresh Token 삭제
         refreshTokenStore.delete(user.getId());
         log.info("[logout] Refresh Token 삭제 완료 - userId: {}", mask(user.getId()));
 
         // 3. Access Token blacklist 등록
-        // TTL = 토큰 만료 시각(epoch초) - 현재 시각(epoch초)
+        // TTL = 토큰 만료 시각 - 현재 시각
         long ttlSeconds = command.tokenExpEpoch() - Instant.now().getEpochSecond();
         accessTokenBlacklist.add(command.jti(), ttlSeconds);
         log.info("[logout] Access Token blacklist 등록 완료 - userId: {}, ttl: {}s", mask(user.getId()), ttlSeconds);
+
+        // 4. AT 캐시 무효화
+        accessTokenCache.delete(user.getEmail());
+        log.info("[logout] AT 캐시 무효화 완료 - userId: {}", mask(user.getId()));
     }
 
     /**
@@ -400,14 +440,14 @@ public class UserCommandService {
      * 2. DB Soft Delete (status=DELETED, deletedBy=본인 DB PK)
      * 3. Keycloak 계정 비활성화 (로그인 차단)
      * 4. Redis Refresh Token 즉시 삭제 (현재 세션 무효화)
-     *
+     * 5. AT 캐시 무효화 (탈퇴 사용자 토큰 즉시 무효화)
      */
     //TODO:DB 커밋 성공 후 Keycloak 호출 실패 시 불일치 발생 가능 -> MVP 구현 후 @TransactionalEventListener(AFTER_COMMIT) 또는 Outbox 패턴 적용 예정
     @Transactional
     public void withdraw(String keycloakId) {
         Objects.requireNonNull(keycloakId, "keycloakId는 null일 수 없습니다.");
 
-        // 1. keycloakId로 사용자 조회
+        // 1. keycloakId로 사용자 조회 (이메일 획득을 위해 필요)
         User user = userRepository.findByKeycloakId(keycloakId)
             .orElseThrow(() -> {
                 log.warn("[withdraw] 존재하지 않는 사용자 - keycloakId: {}", mask(keycloakId));
@@ -423,6 +463,9 @@ public class UserCommandService {
 
         // 4. Redis Refresh Token 즉시 삭제 - 현재 세션 즉시 무효화
         refreshTokenStore.delete(user.getId());
+
+        // 5. AT 캐시 무효화 - 탈퇴 사용자의 토큰이 재로그인 경로에서 반환되지 않도록 즉시 제거
+        accessTokenCache.delete(user.getEmail());
 
         log.info("[withdraw] 회원탈퇴 완료 - userId: {}", mask(user.getId()));
     }
@@ -496,6 +539,9 @@ public class UserCommandService {
         // 5. Keycloak Admin API로 비밀번호 변경
         // 실패 시 KEYCLOAK_PASSWORD_CHANGE_FAILED (500) 발생
         keycloakAuthService.changePassword(user.getKeycloakId(), command.newPassword());
+
+        // 6. AT 캐시 무효화 - 비밀번호 변경 후 구 토큰이 캐시에서 반환되는 경로 차단
+        accessTokenCache.delete(user.getEmail());
 
         log.info("[changePassword] 비밀번호 변경 완료 - userId: {}", mask(user.getId()));
     }

@@ -18,9 +18,9 @@ spring:
     # InetUtils가 IP 선택 시점이 Config Server 받기 전이라
     inetutils:
       preferred-networks:
-        - 10\.
-        - 172\.
-        - 192\.168\.
+        - 10.
+        - 172.
+        - 192.168.
         -
     config:
       username: ${CONFIG_SERVER_USERNAME}  # Config Server Basic Auth

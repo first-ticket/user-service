@@ -1,5 +1,22 @@
 package com.firstticket.userservice.application;
 
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
 import com.firstticket.userservice.application.dto.command.ChangePasswordCommand;
 import com.firstticket.userservice.application.dto.command.LoginCommand;
 import com.firstticket.userservice.application.dto.command.LogoutCommand;
@@ -10,37 +27,15 @@ import com.firstticket.userservice.application.dto.result.TokenResult;
 import com.firstticket.userservice.application.dto.result.UserResult;
 import com.firstticket.userservice.domain.Email;
 import com.firstticket.userservice.domain.User;
-import com.firstticket.userservice.domain.UserRole;
 import com.firstticket.userservice.domain.UserRepository;
+import com.firstticket.userservice.domain.UserRole;
 import com.firstticket.userservice.domain.exception.UserErrorCode;
 import com.firstticket.userservice.domain.exception.UserException;
 import com.firstticket.userservice.domain.service.AccessTokenBlacklist;
+import com.firstticket.userservice.domain.service.AccessTokenCache;
 import com.firstticket.userservice.domain.service.KeycloakAuthService;
 import com.firstticket.userservice.domain.service.RefreshTokenStore;
 import com.firstticket.userservice.domain.service.RefreshTokenStore.RotateResult;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.time.Instant;
-import java.util.Optional;
-import java.util.UUID;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import org.mockito.InOrder;
-
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * UserCommandService 단위 테스트
@@ -68,6 +63,9 @@ class UserCommandServiceTest {
 
     @Mock
     private AccessTokenBlacklist accessTokenBlacklist;
+
+    @Mock
+    private AccessTokenCache accessTokenCache;
 
     // keycloakId는 Keycloak이 발급하는 UUID 문자열
     private final String KEYCLOAK_ID = UUID.randomUUID().toString();
@@ -140,6 +138,8 @@ class UserCommandServiceTest {
             TokenResult tokenResult = new TokenResult("access-token", "refresh-token");
 
             when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+            // 캐시 미스 시나리오: 저장된 AT 없음 → Keycloak 호출 경로 진입
+            when(accessTokenCache.find(anyString())).thenReturn(Optional.empty());
             when(keycloakAuthService.login(anyString(), anyString())).thenReturn(tokenResult);
 
             // when
@@ -149,8 +149,8 @@ class UserCommandServiceTest {
             assertThat(result.accessToken()).isEqualTo("access-token");
             assertThat(result.refreshToken()).isEqualTo("refresh-token");
 
-            // Refresh Token을 Redis에 저장했는지 검증
-            verify(refreshTokenStore).save(any(), anyString());
+            verify(refreshTokenStore).save(any(), anyString()); // RT Redis 저장
+            verify(accessTokenCache).save(anyString(), anyString()); // AT 캐시 저장
         }
 
         @Test
@@ -228,8 +228,10 @@ class UserCommandServiceTest {
 
             // then — Refresh Token 삭제 + Access Token blacklist 등록 순서로 검증
             InOrder inOrder = inOrder(refreshTokenStore, accessTokenBlacklist);
-            inOrder.verify(refreshTokenStore).delete(any());           // Refresh Token 삭제
-            inOrder.verify(accessTokenBlacklist).add(anyString(), anyLong()); // blacklist 등록
+            inOrder.verify(refreshTokenStore).delete(any());
+            inOrder.verify(accessTokenBlacklist).add(anyString(), anyLong());
+            // AT 캐시 무효화 — 로그아웃 후 stale 토큰 재반환 방지
+            verify(accessTokenCache).delete(anyString());
         }
 
         @Test
@@ -466,9 +468,10 @@ class UserCommandServiceTest {
             // when
             userCommandService.withdraw(KEYCLOAK_ID);
 
-            // then - 3단계 처리 모두 호출 검증
+            // then — 3단계 처리 모두 호출 검증
             verify(keycloakAuthService).disableUser(KEYCLOAK_ID); // Keycloak 비활성화
-            verify(refreshTokenStore).delete(any());               // Redis 토큰 삭제
+            verify(refreshTokenStore).delete(any());               // Redis RT 삭제
+            verify(accessTokenCache).delete(anyString());          // AT 캐시 무효화
         }
 
         @Test
@@ -491,7 +494,7 @@ class UserCommandServiceTest {
 
         // 테스트 전용 비밀번호 픽스처 (Password VO 최소 요건인 8자 이상 충족)
         private static final String CURRENT_PW = "CurrentPass1!";
-        private static final String NEW_PW     = "NewPassword1!";
+        private static final String NEW_PW = "NewPassword1!";
 
         @Test
         @DisplayName("정상 변경 시 Keycloak 현재 비밀번호 검증 후 새 비밀번호로 변경한다")
@@ -501,17 +504,18 @@ class UserCommandServiceTest {
             ChangePasswordCommand command = new ChangePasswordCommand(CURRENT_PW, NEW_PW);
 
             when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
-            // login()은 현재 비밀번호 검증 목적으로 호출 - 반환된 토큰은 서비스에서 버림
             when(keycloakAuthService.login(anyString(), anyString()))
                 .thenReturn(new TokenResult("access-token", "refresh-token"));
 
             // when
             userCommandService.changePassword(KEYCLOAK_ID, command);
 
-            // 현재 비밀번호 검증 후 변경 - 흐름 순서를 테스트로 명시
+            // then — 현재 비밀번호 검증 후 변경 흐름 순서 검증
             InOrder inOrder = inOrder(keycloakAuthService);
             inOrder.verify(keycloakAuthService).login(anyString(), anyString());
             inOrder.verify(keycloakAuthService).changePassword(KEYCLOAK_ID, NEW_PW);
+            // AT 캐시 무효화 — 비밀번호 변경 후 구 토큰 재사용 방지
+            verify(accessTokenCache).delete(anyString());
         }
 
         @Test

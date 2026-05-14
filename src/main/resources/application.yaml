@@ -21,7 +21,7 @@ spring:
         - 10.
         - 172.
         - 192.168.
-        -
+        
     config:
       username: ${CONFIG_SERVER_USERNAME}  # Config Server Basic Auth
       password: ${CONFIG_SERVER_PASSWORD}

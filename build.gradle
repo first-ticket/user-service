@@ -1,0 +1,252 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.5.13'
+	id 'io.spring.dependency-management' version '1.1.7'
+    id 'org.asciidoctor.jvm.convert' version '3.3.2'
+    id 'jacoco'
+}
+
+group = 'com.first-ticket'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+// .env 파일 읽기
+def env = [:]
+def envFile = rootProject.file(".env")
+if (envFile.exists()) {
+	envFile.eachLine { line ->
+		if (line && !line.startsWith("#") && line.contains("=")) {
+			def (key, value) = line.split("=", 2)
+			env[key.trim()] = value.trim()
+		}
+	}
+}
+
+def githubUser = env['GITHUB_USER'] ?: System.getenv('GITHUB_USER')
+def githubToken = env['GITHUB_TOKEN'] ?: System.getenv('GITHUB_TOKEN')
+
+if (!githubUser || !githubToken) {
+	throw new GradleException("GITHUB_USER/GITHUB_TOKEN이 필요합니다. .env 또는 환경변수로 설정하세요.")
+}
+
+repositories {
+	mavenCentral()
+	maven {
+		url = 'https://maven.pkg.github.com/first-ticket/common'
+		credentials {
+			username = githubUser
+			password = githubToken
+		}
+	}
+    maven {
+        // common-jpa: JPA 기본 엔티티, SecurityAuditorAware, CommonJpaAutoConfiguration
+        url = 'https://maven.pkg.github.com/first-ticket/common-jpa'
+        credentials {
+            username = githubUser
+            password = githubToken
+        }
+    }
+}
+
+ext {
+	set('springCloudVersion', "2025.0.2")
+    set('snippetsDir', file("build/generated-snippets"))
+}
+
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+	}
+}
+
+def querydslDir = layout.buildDirectory.dir("generated/querydsl").get().asFile
+
+// Asciidoctor 확장 의존성 전용 설정 (spring-restdocs-asciidoctor)
+configurations {
+    asciidoctorExt
+}
+
+configurations.all {
+	resolutionStrategy {
+		// CVE-2024-47554: keycloak-admin-client가 사용하는 commons-io 2.11.0의
+		// XmlStreamReader 자원 소진 취약점 → 2.14.0으로 강제 업그레이드
+		force 'commons-io:commons-io:2.14.0'
+	}
+}
+
+dependencies {
+    // ===== common 공통모듈 =====
+    // 제공 내용: GlobalExceptionHandler, FeignConfig(X-User-Id 헤더 전파), WebConfig, ApiResponse, BusinessException
+    implementation 'com.first-ticket:common:0.0.4-SNAPSHOT'
+
+    // ===== common-jpa 공통 JPA 모듈 =====
+    // 제공 내용: BaseEntity, BaseUserEntity, CommonJpaAutoConfiguration(@EnableJpaAuditing, JPAQueryFactory),
+    // SecurityAuditorAware(X-User-Id 헤더 기반 createdBy/updatedBy 자동 주입)
+    implementation 'com.first-ticket:common-jpa:0.0.1-SNAPSHOT'
+
+	// ===== Spring Boot Starters =====
+	implementation 'org.springframework.boot:spring-boot-starter-web' // MVC, Tomcat
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa' // JPA, Hibernate
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis' // Redis (MVC기반)
+	implementation 'org.springframework.boot:spring-boot-starter-validation' // @Valid (DTO 검증)
+	implementation 'org.springframework.boot:spring-boot-starter-actuator' // health
+
+	// ===== Spring Cloud =====
+	implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client' // Eureka 등록
+	implementation 'org.springframework.cloud:spring-cloud-starter-config' //Config Server 연동
+
+	// ===== Database =====
+	runtimeOnly 'org.postgresql:postgresql' // PostgreSQL JDBC 드라이버
+	implementation 'org.flywaydb:flyway-core' // Flyway DB Migration
+	implementation 'org.flywaydb:flyway-database-postgresql' // PostgreSQL 전용 드라이버 (Flyway 10.x 버전에서 분리됨)
+
+	// ===== QueryDSL =====
+	// 사용자 Search 동적 검색 조건 처리에 사용
+	// common의 JpaConfig가 JPAQueryFactory 빈을 등록하므로 Q클래스 생성만 담당
+	implementation 'com.querydsl:querydsl-jpa:5.0.0:jakarta' // QueryDSL JPA 지원
+	annotationProcessor 'com.querydsl:querydsl-apt:5.0.0:jakarta' // Q클래스 자동 생성 APT
+	annotationProcessor 'jakarta.annotation:jakarta.annotation-api' // APT 의존성
+	annotationProcessor 'jakarta.persistence:jakarta.persistence-api' // APT 의존성
+
+	// ===== Keycloak Admin Client =====
+	// user-service가 직접 keycloak에 사용자 생성(회원가입, 비밀번호 수정) 등을 위임할 때 사용
+	// 버전은 keycloack 서버 버전 (26.0)과 동일하게 설정
+	implementation 'org.keycloak:keycloak-admin-client:26.0.0'
+
+	// ===== Monitoring =====
+	// 운영환경에서 Prometheus가 /actuactor/prometheus 엔드포인트로 Metrics 수집
+    // zipkin 추가
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    runtimeOnly 'io.zipkin.reporter2:zipkin-reporter-brave'
+
+    // Keycloak RestClient 커넥션 풀 튜닝용
+    implementation 'org.apache.httpcomponents.client5:httpclient5'
+
+	// ===== Lombok =====
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+
+	// ===== Test =====
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testCompileOnly         'org.projectlombok:lombok'
+	testAnnotationProcessor 'org.projectlombok:lombok'
+	testRuntimeOnly         'org.junit.platform:junit-platform-launcher'
+	testImplementation 'com.h2database:h2' // 테스트 전용 인메모리 DB
+
+    // ===== REST Docs =====
+    // MockMvc 기반 테스트에서 스니펫 자동 생성
+    testImplementation 'org.springframework.restdocs:spring-restdocs-mockmvc'
+    // AsciiDoc 빌드 시 스니펫을 HTML로 변환하는 Asciidoctor 확장
+    asciidoctorExt 'org.springframework.restdocs:spring-restdocs-asciidoctor'
+}
+
+// QueryDSL Q클래스 생성 경로를 컴파일 소스에 포함
+sourceSets {
+	main.java.srcDirs += [querydslDir]
+}
+
+// 컴파일 단계에서 Q클래스를 querydslDir에 생성
+tasks.withType(JavaCompile).configureEach {
+	options.getGeneratedSourceOutputDirectory().set(querydslDir)
+}
+
+tasks.named('test') {
+    outputs.dir snippetsDir
+    useJUnitPlatform()
+    systemProperty 'spring.cloud.config.enabled', 'false'
+}
+
+asciidoctor {
+    inputs.dir snippetsDir // 스니펫 디렉토리를 입력으로 등록
+    dependsOn test // test 완료 후 실행
+    configurations 'asciidoctorExt'
+    baseDirFollowsSourceFile() // .adoc 파일 기준으로 include:: 상대 경로 해석
+}
+
+
+
+// 빌드된 HTML 문서를 Spring Boot static 리소스 경로로 복사
+// app 실행 시 /docs/index.html 로 접근 가능
+tasks.register('copyDocument', Sync) {
+    dependsOn asciidoctor
+    from layout.buildDirectory.dir("docs/asciidoc")
+    into layout.projectDirectory.dir("src/main/resources/static/docs")
+}
+
+tasks.named('build') {
+    dependsOn copyDocument
+}
+
+// clean 시 Q클래스 생성 디렉토리도 함께 삭제
+clean {
+	delete querydslDir
+}
+
+// ECS 배포 시 이미지 레이어 최적화를 위해 파일명 고정
+// 빌드된 REST Docs HTML을 JAR 내부 static/docs 경로에 포함
+bootJar {
+    archiveFileName = 'app.jar'
+    dependsOn asciidoctor
+    from(layout.buildDirectory.dir("docs/asciidoc")) {
+        into 'static/docs'
+    }
+}
+
+// ===== JaCoCo 테스트 커버리지 =====
+
+// JaCoCo 에이전트 버전 고정 (Spring Boot 3.x 호환)
+jacoco {
+    toolVersion = '0.8.12'
+}
+
+// jacocoTestReport — test task 실행 후 HTML/XML 리포트 생성
+// 실행: ./gradlew test jacocoTestReport
+// 결과: build/reports/jacoco/test/html/index.html
+jacocoTestReport {
+    dependsOn test  // test가 먼저 실행되어야 .exec 파일이 생성됨
+
+    reports {
+        html.required = true   // build/reports/jacoco/test/html/index.html
+        xml.required  = true   // CI 도구(SonarQube 등)와 연동 시 필요
+        csv.required  = false  // 불필요하면 false
+    }
+
+    // 커버리지 측정 제외 대상
+    // 이유: 생성 코드·설정 클래스·DTO는 비즈니스 로직이 없으므로 커버리지 대상에서 제외
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, excludes: [
+                // QueryDSL APT가 자동 생성한 Q-클래스 (테스트 대상 아님)
+                '**/Q*.class',
+
+                // Spring Boot 진입점 — 테스트 환경에서 실행되지 않음
+                '**/*Application.class',
+
+                // 설정 클래스 — 빈 등록/환경설정, 비즈니스 로직 없음
+                '**/*Config.class',
+                '**/*Properties.class',
+                '**/*AutoConfiguration.class',
+
+                // Presentation DTO (request/response) — record, 단순 데이터 컨테이너
+                '**/presentation/dto/**',
+
+                // Application DTO (command/result) — record, 단순 데이터 컨테이너
+                '**/application/dto/**',
+
+                // 도메인 쿼리 DTO — Querydsl Projection 전용 record
+                '**/domain/query/UserSummaryData.class',
+                '**/domain/query/UserSearchSpec.class',
+
+                // Enum ErrorCode / SuccessCode — 상수 정의만 존재
+                '**/*ErrorCode.class',
+                '**/*SuccessCode.class',
+            ])
+        }))
+    }
+}

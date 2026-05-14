@@ -1,0 +1,27 @@
+# 빌드 캐시 / 중간 산출물 (JAR 외 불필요)
+build/classes/
+build/generated/
+build/tmp/
+build/reports/
+build/test-results/
+
+# 로컬 개발 전용 파일
+.env
+*.env
+.gradle/
+
+# IDE / OS 메타데이터
+.idea/
+*.iml
+.DS_Store
+
+# Gradle 캐시 및 빌드 결과물
+build/
+
+# Git 메타데이터
+.git/
+.gitignore
+
+# 문서 / 기타
+*.md
+http/

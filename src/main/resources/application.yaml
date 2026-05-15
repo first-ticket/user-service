@@ -13,6 +13,9 @@ spring:
       - "optional:file:.env[.properties]"                    # Working Dir = user-service/  일 때
       - "optional:configserver:"             # URL 없이 Eureka 디스커버리로 Config Server 탐색
 
+  jackson:
+    time-zone: Asia/Seoul
+
   cloud:
     # ECS Fargate에서 Eureka에 자기 IP를 ECS 메타데이터 IP(169.254.172.2)가 아닌 VPC 내부 IP(172.31.x.x)로 등록되게 하기 위한 설정.
     # InetUtils가 IP 선택 시점이 Config Server 받기 전이라

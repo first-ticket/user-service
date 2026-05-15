@@ -1,8 +1,4 @@
 # first-ticket / user-service CI/CD 통합 워크플로우
-# 트리거: main·dev 브랜치 PR 또는 push 시에 실행
-# 단계 1 - build-and-test (모든 이벤트)
-# 단계 2 - push-to-ecr (main push 시)
-
 name: CI/CD - Build, Test, and Deploy
 
 on:
@@ -65,10 +61,9 @@ jobs:
           retention-days: 7
 
   # Job 2: ECR 이미지 푸시 + ECS 배포
-  # 조건: main 브랜치에 push 이벤트일 때만 실행
   push-to-ecr:
     needs: build-and-test # build-and-test 성공 후 실행
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
 
     steps:

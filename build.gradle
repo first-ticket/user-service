@@ -87,7 +87,7 @@ dependencies {
     // ===== common-jpa 공통 JPA 모듈 =====
     // 제공 내용: BaseEntity, BaseUserEntity, CommonJpaAutoConfiguration(@EnableJpaAuditing, JPAQueryFactory),
     // SecurityAuditorAware(X-User-Id 헤더 기반 createdBy/updatedBy 자동 주입)
-    implementation 'com.first-ticket:common-jpa:0.0.1-SNAPSHOT'
+    implementation 'com.first-ticket:common-jpa:0.0.2-SNAPSHOT'
 
 	// ===== Spring Boot Starters =====
 	implementation 'org.springframework.boot:spring-boot-starter-web' // MVC, Tomcat

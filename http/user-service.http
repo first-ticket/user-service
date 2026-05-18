@@ -64,9 +64,9 @@ POST {{baseUrl}}/api/v1/auth/signup
 Content-Type: application/json
 
 {
-    "email": "test001@example.com",
+    "email": "test004@example.com",
     "password": "password123!",
-    "username": "테스트유저"
+    "username": "테스트유저004"
 }
 
 ### 로그인 (일반사용자)
@@ -75,7 +75,7 @@ POST {{baseUrl}}/api/v1/auth/login
 Content-Type: application/json
 
 {
-    "email": "test001@example.com",
+    "email": "test003@example.com",
     "password": "password123!"
 }
 

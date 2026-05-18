@@ -4,15 +4,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # /run/secrets/github_token 마운트
+      secrets:
+        - github_token
       args:
         GITHUB_USER: ${GITHUB_USER}
-        GITHUB_TOKEN: ${GITHUB_TOKEN}
     container_name: first-ticket-user
 
     ports:
       - "8081:8080"
 
     environment:
+      SERVER_PORT: 8080
       # 활성 프로파일 - prod로 기동
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
 
@@ -21,6 +24,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://first-ticket-postgres:5432/first_ticket
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
+
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
 
       EUREKA_SERVER_URL: ${EUREKA_SERVER_URL:-eureka-server}
       CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME}
@@ -37,6 +42,8 @@ services:
       DB_HOST: first-ticket-postgres
       DB_USERNAME: ${POSTGRES_USER:-postgres}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+      SPRING_DATA_REDIS_HOST: ${REDIS_HOST:-first-ticket-redis}
 
       # GITHUB_USER / GITHUB_TOKEN은 환경변수에 포함하지 않음
       # 이유: user-service Dockerfile은 사전 빌드 방식
@@ -59,3 +66,8 @@ networks:
   first-ticket-network:
     external: true
     name: first-ticket-network
+
+# 호스트의 GITHUB_TOKEN 환경변수를 secret으로 주입
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN
